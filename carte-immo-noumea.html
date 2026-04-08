@@ -4013,9 +4013,12 @@ function initFirebase() {
       db.ref(path).on('value', snap => {
         fbData[path] = snap.val() || {};
         // Refresh UI when data changes (from other user)
-        if (typeof renderTable === 'function' && document.getElementById('table-body')) {
-          renderTable();
-        }
+        // Guard: TABLE_COLS may not yet be initialized during script parsing
+        try {
+          if (typeof renderTable === 'function' && document.getElementById('table-body')) {
+            renderTable();
+          }
+        } catch(e) {}
         if (typeof applyFilters === 'function') {
           try { applyFilters(); } catch(e) {}
         }
