@@ -1,0 +1,2997 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Immobilier Nouméa — Carte Interactive</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<!-- Firebase -->
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #1a1a2e; color: #eee; }
+
+/* Tab system */
+.tab-bar { display: flex; background: #0a0a1a; border-bottom: 2px solid #0f3460; height: 42px; align-items: stretch; padding: 0 10px; }
+.tab-btn { background: none; border: none; color: #a0a0b0; font-size: 0.9em; font-weight: 600; padding: 0 20px; cursor: pointer; border-bottom: 3px solid transparent; transition: all 0.2s; }
+.tab-btn:hover { color: #eee; }
+.tab-btn.active { color: #e94560; border-bottom-color: #e94560; }
+.tab-content { display: none; height: calc(100vh - 42px); }
+.tab-content.active { display: flex; }
+
+#app { display: flex; flex-direction: column; height: 100vh; }
+#tab-carte { display: flex; flex: 1; }
+#tab-tableau { flex-direction: column; overflow: hidden; }
+
+/* Tableau dynamique */
+.tableau-header { padding: 12px 20px; background: #16213e; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; border-bottom: 1px solid #0f3460; }
+.tableau-search { flex: 1; min-width: 200px; padding: 8px 14px; background: #1a1a2e; border: 1px solid #0f3460; border-radius: 8px; color: #eee; font-size: 0.9em; }
+.tableau-search::placeholder { color: #666; }
+.col-toggle-btn { padding: 6px 12px; background: #0f3460; border: 1px solid #1a3a6e; border-radius: 6px; color: #a0a0b0; font-size: 0.8em; cursor: pointer; }
+.col-toggle-btn:hover { background: #1a3a6e; color: #eee; }
+.col-toggles { position: absolute; top: 100%; right: 0; background: #16213e; border: 1px solid #0f3460; border-radius: 8px; padding: 10px; z-index: 100; display: none; min-width: 220px; max-height: 400px; overflow-y: auto; }
+.col-toggles.open { display: block; }
+.col-toggles label { display: flex; align-items: center; gap: 6px; padding: 4px 0; font-size: 0.82em; color: #ccc; cursor: pointer; }
+.col-toggles input { accent-color: #e94560; }
+.group-selector { padding: 6px 10px; background: #1a1a2e; border: 1px solid #0f3460; border-radius: 6px; color: #eee; font-size: 0.82em; }
+.export-btn { padding: 6px 12px; background: #27ae60; border: none; border-radius: 6px; color: white; font-size: 0.8em; cursor: pointer; font-weight: 600; }
+.export-btn:hover { background: #2ecc71; }
+
+.tableau-container { flex: 1; overflow: auto; }
+.data-table { width: 100%; border-collapse: collapse; font-size: 0.82em; }
+.data-table thead { position: sticky; top: 0; z-index: 10; }
+.data-table th { background: #0f3460; color: #a0a0b0; padding: 8px 10px; text-align: left; cursor: pointer; white-space: nowrap; user-select: none; border-right: 1px solid #1a1a2e; }
+.data-table th:hover { color: #e94560; }
+.data-table th .sort-icon { margin-left: 4px; font-size: 0.8em; }
+.data-table td { padding: 7px 10px; border-bottom: 1px solid rgba(15,52,96,0.4); white-space: nowrap; }
+.data-table tr:hover td { background: rgba(233,69,96,0.08); }
+.data-table tr.group-header td { background: #0f3460; color: #e94560; font-weight: 700; padding: 10px; font-size: 0.95em; }
+.data-table a { color: #3498db; text-decoration: none; }
+.data-table a:hover { text-decoration: underline; }
+.data-table .thumb { width: 50px; height: 35px; object-fit: cover; border-radius: 4px; cursor: pointer; }
+.data-table .rdt-good { color: #2ecc71; font-weight: 700; }
+.data-table .rdt-medium { color: #f1c40f; font-weight: 700; }
+.data-table .rdt-bad { color: #e74c3c; font-weight: 700; }
+.data-table .no-results td { text-align: center; color: #666; padding: 30px; font-size: 1.1em; }
+.data-table .stars { white-space: nowrap; }
+
+/* Stats bar under table */
+.tableau-footer { padding: 8px 20px; background: #16213e; border-top: 1px solid #0f3460; display: flex; gap: 20px; font-size: 0.82em; color: #a0a0b0; flex-wrap: wrap; }
+.tableau-footer .stat { display: flex; gap: 4px; }
+.tableau-footer .stat-val { color: #e94560; font-weight: 700; }
+
+/* Q&A module */
+/* Actions menu */
+.actions-btn { padding: 6px 14px; background: #0f3460; border: 1px solid #1a3a6e; border-radius: 6px; color: #a0a0b0; font-size: 0.82em; cursor: pointer; font-weight: 600; }
+.actions-btn:hover { background: #1a3a6e; color: #eee; }
+.actions-menu { position: absolute; top: 100%; right: 0; background: #16213e; border: 1px solid #0f3460; border-radius: 8px; padding: 6px 0; z-index: 100; display: none; min-width: 240px; box-shadow: 0 8px 24px rgba(0,0,0,0.5); }
+.actions-menu.open { display: block; }
+.actions-menu-item { padding: 8px 16px; font-size: 0.85em; cursor: pointer; color: #ccc; transition: background 0.15s; }
+.actions-menu-item:hover { background: #0f3460; color: #eee; }
+.actions-menu-item.danger { color: #e74c3c; }
+.actions-menu-item.danger:hover { background: #5c1a1a; }
+.actions-menu-sep { height: 1px; background: #0f3460; margin: 4px 0; }
+.selection-info { font-size: 0.85em; color: #e94560; font-weight: 700; display: flex; align-items: center; }
+/* Checkbox column */
+.data-table .row-check { width: 16px; height: 16px; accent-color: #e94560; cursor: pointer; }
+.data-table th .row-check { cursor: pointer; }
+.data-table tr.selected td { background: rgba(233,69,96,0.12); }
+.data-table tr.selected td:first-child { border-left: 3px solid #e94560; }
+/* User selector modal */
+.user-modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 9999; display: flex; align-items: center; justify-content: center; }
+.user-modal { background: #16213e; border: 2px solid #e94560; border-radius: 16px; padding: 40px; text-align: center; max-width: 400px; }
+.user-modal h2 { color: #e94560; margin-bottom: 8px; font-size: 1.4em; }
+.user-modal p { color: #a0a0b0; margin-bottom: 24px; font-size: 0.9em; }
+.user-modal .user-btn { display: block; width: 100%; padding: 14px; margin-bottom: 12px; border: 2px solid #0f3460; border-radius: 10px; background: #1a1a2e; color: #eee; font-size: 1.1em; font-weight: 700; cursor: pointer; transition: all 0.2s; }
+.user-modal .user-btn:hover { border-color: #e94560; background: #0f3460; }
+.user-modal .user-btn.jev { border-left: 5px solid #f1c40f; }
+.user-modal .user-btn.mc { border-left: 5px solid #e67e22; }
+/* Connection indicator */
+.conn-badge { padding: 3px 10px; border-radius: 12px; font-size: 0.72em; font-weight: 600; margin-left: 8px; }
+.conn-online { background: #27ae60; color: white; }
+.conn-offline { background: #e74c3c; color: white; }
+.current-user-badge { padding: 3px 10px; border-radius: 12px; font-size: 0.75em; font-weight: 700; cursor: pointer; }
+.current-user-badge.jev { background: #f1c40f; color: #1a1a2e; }
+.current-user-badge.mc { background: #e67e22; color: white; }
+
+/* Drag & drop columns */
+.data-table th[draggable="true"] { cursor: grab; }
+.data-table th[draggable="true"]:active { cursor: grabbing; }
+.data-table th.drag-over-left { box-shadow: inset 3px 0 0 #e94560; }
+.data-table th.drag-over-right { box-shadow: inset -3px 0 0 #e94560; }
+#sidebar { width: 380px; min-width: 380px; background: #16213e; overflow-y: auto; display: flex; flex-direction: column; border-right: 2px solid #0f3460; }
+#map-container { flex: 1; position: relative; }
+#map { width: 100%; height: 100%; }
+
+.sidebar-header { padding: 16px 20px; background: #0f3460; text-align: center; }
+.sidebar-header h1 { font-size: 1.2em; color: #e94560; margin-bottom: 3px; }
+.sidebar-header .subtitle { font-size: 0.8em; color: #a0a0b0; }
+.header-stats { display: flex; gap: 10px; justify-content: center; margin-top: 8px; flex-wrap: wrap; }
+.header-badge { padding: 2px 10px; border-radius: 12px; font-size: 0.75em; font-weight: 600; }
+.hb-actif { background: #27ae60; color: white; }
+.hb-archive { background: #f39c12; color: white; }
+.hb-supprime { background: #e74c3c; color: white; cursor: pointer; }
+
+.section { padding: 13px 15px; border-bottom: 1px solid #0f3460; }
+.section-title { font-size: 0.85em; font-weight: 700; color: #e94560; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
+
+.color-mode-selector { display: flex; flex-wrap: wrap; gap: 5px; }
+.color-btn { padding: 4px 10px; border: 1px solid #0f3460; border-radius: 20px; background: #1a1a2e; color: #a0a0b0; font-size: 0.75em; cursor: pointer; transition: all 0.2s; }
+.color-btn:hover, .color-btn.active { background: #e94560; color: white; border-color: #e94560; }
+
+.filter-group { margin-bottom: 8px; }
+.filter-group label { display: block; font-size: 0.75em; color: #a0a0b0; margin-bottom: 3px; }
+.filter-group select, .filter-group input { width: 100%; padding: 5px 8px; border: 1px solid #0f3460; border-radius: 6px; background: #1a1a2e; color: #eee; font-size: 0.82em; }
+.filter-row { display: flex; gap: 8px; }
+.filter-row .filter-group { flex: 1; }
+
+.archive-toggle { width: 100%; padding: 6px 10px; margin-top: 6px; border: 1px solid #0f3460; border-radius: 6px; background: #1a1a2e; color: #a0a0b0; cursor: pointer; font-size: 0.78em; transition: all 0.2s; text-align: center; }
+.archive-toggle.active { background: #f39c12; color: white; border-color: #f39c12; }
+.restore-all { width: 100%; padding: 5px 10px; margin-top: 4px; border: 1px solid #e74c3c; border-radius: 6px; background: transparent; color: #e74c3c; cursor: pointer; font-size: 0.75em; transition: all 0.2s; text-align: center; }
+.restore-all:hover { background: #e74c3c; color: white; }
+
+.stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+.stat-card { background: #1a1a2e; border-radius: 8px; padding: 10px; text-align: center; }
+.stat-value { font-size: 1.3em; font-weight: 700; color: #e94560; }
+.stat-label { font-size: 0.68em; color: #a0a0b0; margin-top: 2px; }
+.stat-card.wide { grid-column: 1 / -1; }
+
+.quartier-table { width: 100%; border-collapse: collapse; font-size: 0.73em; margin-top: 6px; }
+.quartier-table th { text-align: left; color: #a0a0b0; padding: 3px 5px; border-bottom: 1px solid #0f3460; }
+.quartier-table td { padding: 3px 5px; border-bottom: 1px solid rgba(15,52,96,0.5); }
+.quartier-color { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 4px; vertical-align: middle; }
+
+.legend { position: absolute; bottom: 30px; right: 10px; background: rgba(22,33,62,0.95); padding: 10px 14px; border-radius: 10px; z-index: 1000; font-size: 0.78em; border: 1px solid #0f3460; max-height: 280px; overflow-y: auto; }
+.legend-title { font-weight: 700; margin-bottom: 5px; color: #e94560; }
+.legend-item { display: flex; align-items: center; gap: 5px; margin-bottom: 3px; }
+.legend-color { width: 14px; height: 14px; border-radius: 3px; flex-shrink: 0; }
+.legend-gradient { width: 100%; height: 12px; border-radius: 4px; margin: 4px 0; }
+.legend-labels { display: flex; justify-content: space-between; font-size: 0.8em; color: #a0a0b0; }
+
+.annonce-card { background: #1a1a2e; border-radius: 8px; padding: 11px 12px; margin-bottom: 7px; cursor: pointer; transition: all 0.2s; border-left: 3px solid transparent; position: relative; }
+.annonce-card:hover { border-left-color: #e94560; transform: translateX(3px); }
+.annonce-card.archived { opacity: 0.5; }
+.annonce-card.archived .title { text-decoration: line-through; }
+.annonce-card .title { font-weight: 600; font-size: 0.88em; margin-bottom: 3px; }
+.annonce-card .meta { font-size: 0.73em; color: #a0a0b0; }
+.annonce-card .price { color: #e94560; font-weight: 700; font-size: 1.05em; }
+.annonce-card .badges { display: flex; gap: 3px; margin-top: 5px; flex-wrap: wrap; }
+.badge { padding: 2px 7px; border-radius: 10px; font-size: 0.68em; background: #0f3460; color: #a0a0b0; }
+.badge.good { background: #27ae60; color: white; }
+.badge.medium { background: #f39c12; color: white; }
+.badge.bad { background: #e74c3c; color: white; }
+.badge.src-immo { background: #0d47a1; color: white; }
+.badge.src-immonc { background: #006064; color: white; }
+.badge.src-fb { background: #1877f2; color: white; }
+.badge.archived-badge { background: #f39c12; color: white; }
+.badge.estimated { background: #37474f; color: #b0bec5; font-style: italic; }
+
+.card-actions { display: flex; gap: 4px; margin-top: 7px; }
+.card-btn { padding: 3px 9px; border: none; border-radius: 5px; cursor: pointer; font-size: 0.68em; font-weight: 600; transition: opacity 0.2s; }
+.card-btn:hover { opacity: 0.8; }
+.card-btn-archive { background: #f39c12; color: white; }
+.card-btn-delete { background: #e74c3c; color: white; }
+.card-btn-restore { background: #27ae60; color: white; }
+
+.leaflet-popup-content-wrapper { background: #16213e; color: #eee; border-radius: 10px; box-shadow: 0 4px 20px rgba(0,0,0,0.5); }
+.leaflet-popup-tip { background: #16213e; }
+.leaflet-popup-content { margin: 14px 16px; }
+.popup-title { font-weight: 700; font-size: 1.05em; color: #e94560; margin-bottom: 8px; }
+.popup-row { display: flex; justify-content: space-between; padding: 2px 0; font-size: 0.83em; border-bottom: 1px solid rgba(15,52,96,0.4); }
+.popup-row:last-of-type { border-bottom: none; }
+.popup-row .label { color: #a0a0b0; }
+.popup-row .value { font-weight: 600; }
+.popup-rendement { text-align: center; margin: 8px 0; padding: 7px; background: #1a1a2e; border-radius: 6px; }
+.popup-rendement .val { font-size: 1.4em; font-weight: 700; }
+.popup-notes { margin-top: 7px; font-size: 0.78em; color: #a0a0b0; font-style: italic; line-height: 1.4; }
+.popup-photos { margin: 8px 0; position: relative; }
+.popup-photos .gallery-main { width: 100%; height: 150px; object-fit: cover; border-radius: 6px; cursor: pointer; display: block; }
+.popup-photos .gallery-nav { position: absolute; top: 50%; transform: translateY(-50%); background: rgba(0,0,0,0.6); color: white; border: none; border-radius: 50%; width: 26px; height: 26px; cursor: pointer; font-size: 14px; display: flex; align-items: center; justify-content: center; }
+.popup-photos .gallery-nav:hover { background: rgba(233,69,96,0.8); }
+.popup-photos .gallery-prev { left: 4px; }
+.popup-photos .gallery-next { right: 4px; }
+.popup-photo-count { font-size: 0.72em; color: #a0a0b0; text-align: center; margin-top: 3px; }
+.popup-thumbs { display: flex; gap: 3px; margin-top: 4px; overflow-x: auto; }
+.popup-thumbs img { width: 42px; height: 32px; object-fit: cover; border-radius: 3px; cursor: pointer; opacity: 0.6; border: 1px solid transparent; transition: all 0.2s; flex-shrink: 0; }
+.popup-thumbs img:hover, .popup-thumbs img.active { opacity: 1; border-color: #e94560; }
+
+/* Lightbox full screen */
+.lightbox-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.92); z-index: 10000; justify-content: center; align-items: center; flex-direction: column; }
+.lightbox-overlay.open { display: flex; }
+.lightbox-overlay img { max-width: 90vw; max-height: 80vh; border-radius: 8px; object-fit: contain; }
+.lightbox-close { position: absolute; top: 15px; right: 20px; color: white; font-size: 2em; cursor: pointer; background: none; border: none; }
+.lightbox-nav { position: absolute; top: 50%; transform: translateY(-50%); color: white; font-size: 2.5em; cursor: pointer; background: rgba(255,255,255,0.1); border: none; border-radius: 50%; width: 50px; height: 50px; display: flex; align-items: center; justify-content: center; }
+.lightbox-nav:hover { background: rgba(233,69,96,0.5); }
+.lightbox-prev { left: 15px; }
+.lightbox-next { right: 15px; }
+.lightbox-counter { color: #a0a0b0; margin-top: 10px; font-size: 0.9em; }
+.popup-actions { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
+.btn-action { padding: 5px 11px; border: none; border-radius: 6px; cursor: pointer; font-size: 0.8em; font-weight: 600; transition: opacity 0.2s; }
+.btn-action:hover { opacity: 0.8; }
+.btn-archive { background: #f39c12; color: white; }
+.btn-delete { background: #e74c3c; color: white; }
+.btn-restore { background: #27ae60; color: white; }
+.btn-link { background: #3498db; color: white; text-decoration: none; display: inline-flex; align-items: center; padding: 5px 11px; border-radius: 6px; font-size: 0.8em; font-weight: 600; }
+.popup-archived-notice { background: #f39c12; color: white; border-radius: 5px; padding: 4px 10px; font-size: 0.78em; font-weight: 600; margin-bottom: 8px; text-align: center; }
+.popup-estimated { background: #263238; border: 1px solid #546e7a; border-radius: 5px; padding: 4px 8px; font-size: 0.73em; color: #90a4ae; margin-top: 6px; }
+
+#toggle-sidebar { display: none; position: absolute; top: 10px; left: 10px; z-index: 1001; background: #e94560; color: white; border: none; padding: 8px 14px; border-radius: 8px; cursor: pointer; font-size: 1em; }
+
+#sidebar::-webkit-scrollbar { width: 5px; }
+#sidebar::-webkit-scrollbar-track { background: #16213e; }
+#sidebar::-webkit-scrollbar-thumb { background: #0f3460; border-radius: 3px; }
+
+@media (max-width: 900px) {
+  #sidebar { position: absolute; z-index: 1001; left: -380px; transition: left 0.3s; height: 100vh; }
+  #sidebar.open { left: 0; }
+  #toggle-sidebar { display: block; }
+}
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="tab-bar">
+    <button class="tab-btn active" onclick="switchTab('carte')">🗺️ Carte</button>
+    <button class="tab-btn" onclick="switchTab('tableau')">📊 Tableau de données</button>
+    <div style="flex:1;"></div>
+    <div style="display:flex;align-items:center;gap:6px;">
+      <span class="current-user-badge" id="user-badge" onclick="chooseUser()" title="Cliquer pour changer d'utilisateur">…</span>
+      <span class="conn-badge conn-offline" id="conn-badge">Hors ligne</span>
+    </div>
+  </div>
+
+  <!-- User selection modal -->
+  <div class="user-modal-overlay" id="user-modal" style="display:none;">
+    <div class="user-modal">
+      <h2>Qui êtes-vous ?</h2>
+      <p>Chaque personne a ses propres colonnes de notes et d'étoiles.</p>
+      <button class="user-btn jev" onclick="selectUser('jev')">👤 Jean-II (JEV)</button>
+      <button class="user-btn mc" onclick="selectUser('mc')">👤 Marie Casselz (MC)</button>
+    </div>
+  </div>
+
+  <div class="tab-content active" id="tab-carte" style="display:flex;">
+  <button id="toggle-sidebar" onclick="document.getElementById('sidebar').classList.toggle('open')">☰ Menu</button>
+
+  <div id="sidebar">
+    <div class="sidebar-header">
+      <h1>🏠 Immobilier Nouméa</h1>
+      <div class="subtitle">Carte interactive — Analyse de marché</div>
+      <div class="subtitle" id="last-update"></div>
+      <div class="header-stats" id="header-stats"></div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">🎨 Colorisation des marqueurs</div>
+      <div class="color-mode-selector">
+        <button class="color-btn active" data-mode="quartier">Quartier</button>
+        <button class="color-btn" data-mode="prix_m2">Prix/m²</button>
+        <button class="color-btn" data-mode="rendement">Rendement</button>
+        <button class="color-btn" data-mode="etat">État</button>
+        <button class="color-btn" data-mode="type">Type</button>
+        <button class="color-btn" data-mode="source">Source</button>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">🔍 Filtres</div>
+      <div class="filter-group">
+        <label>Quartier</label>
+        <select id="filter-quartier"><option value="tous">Tous les quartiers</option></select>
+      </div>
+      <div class="filter-group">
+        <label>Type de bien</label>
+        <select id="filter-type">
+          <option value="tous">Tous</option>
+          <option value="appartement">Appartement</option>
+          <option value="maison">Maison</option>
+        </select>
+      </div>
+      <div class="filter-row">
+        <div class="filter-group">
+          <label>Prix min (MF)</label>
+          <input type="number" id="filter-prix-min" placeholder="0" step="1">
+        </div>
+        <div class="filter-group">
+          <label>Prix max (MF)</label>
+          <input type="number" id="filter-prix-max" placeholder="∞" step="1">
+        </div>
+      </div>
+      <div class="filter-row">
+        <div class="filter-group">
+          <label>Surface min (m²)</label>
+          <input type="number" id="filter-surface-min" placeholder="0">
+        </div>
+        <div class="filter-group">
+          <label>Rendement min (%)</label>
+          <input type="number" id="filter-rendement-min" placeholder="0" step="0.5">
+        </div>
+      </div>
+      <div class="filter-group">
+        <label>Source</label>
+        <select id="filter-source">
+          <option value="tous">Toutes sources</option>
+          <option value="immonc.com">immonc.com</option>
+          <option value="immobilier.nc">immobilier.nc</option>
+          <option value="bienmeloger.nc">bienmeloger.nc</option>
+          <option value="facebook">Facebook</option>
+          <option value="nestenn">Nestenn</option>
+          <option value="jean-ii">Jean-II (manuel)</option>
+        </select>
+      </div>
+      <div class="filter-group">
+        <label>Ajoutée depuis le</label>
+        <input type="date" id="filter-date-depuis">
+      </div>
+      <div class="filter-group">
+        <label>Ajoutée jusqu'au</label>
+        <input type="date" id="filter-date-jusqua">
+      </div>
+      <div class="filter-group" style="margin-top:4px;">
+        <div class="date-shortcuts" style="display:flex;gap:4px;flex-wrap:wrap;">
+          <button class="color-btn" onclick="setDateFilter(0)">Aujourd'hui</button>
+          <button class="color-btn" onclick="setDateFilter(3)">3 derniers jours</button>
+          <button class="color-btn" onclick="setDateFilter(7)">7 derniers jours</button>
+          <button class="color-btn" onclick="setDateFilter(30)">30 jours</button>
+          <button class="color-btn" onclick="clearDateFilter()">Tout</button>
+        </div>
+      </div>
+      <button class="archive-toggle" id="toggle-arch" onclick="toggleArchivees()">📦 Voir les archivées</button>
+      <button class="restore-all" onclick="toutRestaurer()">↩️ Tout restaurer</button>
+    </div>
+
+    <div class="section">
+      <div class="section-title">📊 Tableau de bord</div>
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-value" id="stat-nb">0</div>
+          <div class="stat-label">Annonces</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" id="stat-prix-moyen">0</div>
+          <div class="stat-label">Prix moyen (MF)</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" id="stat-prix-m2">0</div>
+          <div class="stat-label">Prix moy/m² (kF)</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" id="stat-rendement">0%</div>
+          <div class="stat-label">Rendement brut moy</div>
+        </div>
+        <div class="stat-card wide">
+          <div class="stat-value" id="stat-surface-moy">0</div>
+          <div class="stat-label">Surface moyenne (m²)</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">🏘️ Synthèse par quartier</div>
+      <table class="quartier-table">
+        <thead><tr><th>Quartier</th><th>Nb</th><th>Prix/m²</th><th>Rdt</th></tr></thead>
+        <tbody id="quartier-tbody"></tbody>
+      </table>
+    </div>
+
+    <div class="section">
+      <div class="section-title">📋 Liste (<span id="annonce-count">0</span>)</div>
+      <div id="annonce-list"></div>
+    </div>
+  </div>
+
+  <div id="map-container">
+    <div id="map"></div>
+    <div class="legend" id="legend"></div>
+  </div>
+  </div><!-- /tab-carte -->
+
+  <div class="tab-content" id="tab-tableau">
+    <div class="tableau-header">
+      <input type="text" class="tableau-search" id="table-search" placeholder="🔍 Rechercher (titre, quartier, notes...)">
+      <select class="group-selector" id="group-by">
+        <option value="none">Pas de regroupement</option>
+        <option value="quartier">Par quartier</option>
+        <option value="type_bien">Par type de bien</option>
+        <option value="source">Par source</option>
+        <option value="etat">Par état</option>
+      </select>
+      <div style="position:relative;">
+        <button class="col-toggle-btn" onclick="document.getElementById('col-toggles').classList.toggle('open')">⚙️ Colonnes</button>
+        <div class="col-toggles" id="col-toggles"></div>
+      </div>
+      <button class="export-btn" onclick="exportCSV()">📥 Exporter CSV</button>
+      <div class="selection-info" id="selection-info" style="display:none;">
+        <span id="selection-count">0</span> sélectionnée(s)
+      </div>
+      <div style="position:relative;">
+        <button class="actions-btn" id="actions-btn" onclick="document.getElementById('actions-menu').classList.toggle('open')">⚙️ Actions ▾</button>
+        <div class="actions-menu" id="actions-menu">
+          <div class="actions-menu-item" onclick="bulkAction('archive')">📦 Archiver la sélection</div>
+          <div class="actions-menu-item" onclick="bulkAction('restore')">↩️ Restaurer la sélection</div>
+          <div class="actions-menu-sep"></div>
+          <div class="actions-menu-item" onclick="bulkAction('rate', 5)">⭐ Noter 5 étoiles</div>
+          <div class="actions-menu-item" onclick="bulkAction('rate', 4)">⭐ Noter 4 étoiles</div>
+          <div class="actions-menu-item" onclick="bulkAction('rate', 3)">⭐ Noter 3 étoiles</div>
+          <div class="actions-menu-item" onclick="bulkAction('rate', 0)">☆ Retirer les notes</div>
+          <div class="actions-menu-sep"></div>
+          <div class="actions-menu-item" onclick="bulkAction('selectAll')">☑️ Tout sélectionner</div>
+          <div class="actions-menu-item" onclick="bulkAction('selectNone')">☐ Tout désélectionner</div>
+          <div class="actions-menu-item" onclick="bulkAction('invertSelection')">🔄 Inverser la sélection</div>
+          <div class="actions-menu-sep"></div>
+          <div class="actions-menu-item danger" onclick="bulkAction('delete')">🗑️ Supprimer la sélection</div>
+        </div>
+      </div>
+    </div>
+    <div class="tableau-container">
+      <table class="data-table" id="data-table">
+        <thead><tr id="table-head"></tr></thead>
+        <tbody id="table-body"></tbody>
+      </table>
+    </div>
+    <div class="tableau-footer" id="table-footer"></div>
+  </div><!-- /tab-tableau -->
+
+</div><!-- /app -->
+
+<script>
+// ============================================
+//  DATA — 07/04/2026
+// ============================================
+const DATA = {
+  "metadata": { "derniere_maj": "2026-04-08", "nombre_annonces": 38, "version": "2.1" },
+  "quartiers": {
+    "centre-ville":      { "nom": "Centre-Ville",       "couleur": "#e74c3c" },
+    "quartier-latin":    { "nom": "Quartier Latin",      "couleur": "#ad1457" },
+    "baie-des-citrons":  { "nom": "Baie des Citrons",    "couleur": "#3498db" },
+    "anse-vata":         { "nom": "Anse Vata",           "couleur": "#2ecc71" },
+    "motor-pool":        { "nom": "Motor Pool",          "couleur": "#f39c12" },
+    "riviere-salee":     { "nom": "Rivière Salée",       "couleur": "#9b59b6" },
+    "magenta":           { "nom": "Magenta",             "couleur": "#1abc9c" },
+    "nouville":          { "nom": "Nouville",            "couleur": "#e67e22" },
+    "montravel":         { "nom": "Montravel",           "couleur": "#34495e" },
+    "dumbea":            { "nom": "Dumbéa",              "couleur": "#7f8c8d" },
+    "paita":             { "nom": "Païta",               "couleur": "#6d4c41" },
+    "mont-dore":         { "nom": "Mont-Dore",           "couleur": "#1b5e20" },
+    "portes-de-fer":     { "nom": "Portes de Fer",       "couleur": "#e91e63" },
+    "ouemo":             { "nom": "Ouémo",               "couleur": "#00bcd4" },
+    "vallee-des-colons": { "nom": "Vallée des Colons",   "couleur": "#8bc34a" },
+    "normandie":         { "nom": "Normandie",           "couleur": "#ff5722" },
+    "ducos":             { "nom": "Ducos",               "couleur": "#795548" },
+    "pk6":               { "nom": "P.K.6",               "couleur": "#ffc107" },
+    "pk7":               { "nom": "P.K.7",               "couleur": "#ff9800" },
+    "faubourg-blanchot": { "nom": "Faubourg Blanchot",   "couleur": "#673ab7" },
+    "val-plaisance":     { "nom": "Val Plaisance",       "couleur": "#009688" },
+    "port-plaisance":    { "nom": "Port Plaisance",      "couleur": "#03a9f4" },
+    "vallee-de-tina":    { "nom": "Vallée de Tina",      "couleur": "#4caf50" },
+    "montagne-coupee":   { "nom": "Montagne Coupée",     "couleur": "#607d8b" },
+    "6eme-km":           { "nom": "6ème km",             "couleur": "#ff6f00" }
+  },
+  "annonces": [
+  {
+    "id": "immobilier_nc_505768",
+    "titre": "Maison F5 — Magenta",
+    "type_bien": "maison",
+    "quartier": "magenta",
+    "adresse": "Magenta, Nouméa",
+    "prix_vente": 32900000,
+    "surface_m2": 100,
+    "nb_pieces": 5,
+    "nb_chambres": 4,
+    "loyer_mensuel_estime": 165000,
+    "loyer_reel": null,
+    "donnees_estimees": true,
+    "source": "immobilier.nc",
+    "ref": "505768",
+    "url_annonce": "https://www.immobilier.nc/posts/offers/505768",
+    "photos": [
+      "https://www.bienmeloger.nc/media/006/deecc82a-76c3-4bc9-b002-9f6ffc571544-202604020006.jpeg",
+      "https://www.bienmeloger.nc/media/006/effd31fd-cbf1-429f-ad96-aa9fb5d19830-202604020006.jpeg",
+      "https://www.bienmeloger.nc/media/006/c5157429-1651-44b3-bde9-75e6737de63a-202604020006.jpeg"
+    ],
+    "origine": "Acti Immo",
+    "lat": -22.2701,
+    "lng": 166.4381,
+    "etage": null,
+    "etat": "bon",
+    "travaux_estimes": 0,
+    "charges_mensuelles": 0,
+    "taxe_fonciere_annuelle": 0,
+    "parking": false,
+    "meuble": false,
+    "date_ajout": "2026-04-07",
+    "notes": ""
+  },
+  {
+    "id": "immobilier_nc_485337",
+    "titre": "Appt F3 — Nouville",
+    "type_bien": "appartement",
+    "quartier": "nouville",
+    "adresse": "Nouville, Nouméa",
+    "prix_vente": 27000000,
+    "surface_m2": 70,
+    "nb_pieces": 3,
+    "nb_chambres": 2,
+    "loyer_mensuel_estime": 100000,
+    "loyer_reel": 100000,
+    "donnees_estimees": false,
+    "source": "immobilier.nc",
+    "ref": "485337",
+    "url_annonce": "https://www.immobilier.nc/posts/offers/485337",
+    "photos": [
+      "https://www.bienmeloger.nc/media/106/a289b016-038e-4645-9bda-51b449cc8fde-202601272106.jpeg",
+      "https://www.bienmeloger.nc/media/106/c3c7be8c-0ca7-40a2-9a00-6f46237f74e4-202601272106.jpeg",
+      "https://www.bienmeloger.nc/media/106/d25cc57e-3357-4c2a-b219-e07444ed34d7-202601272106.jpeg"
+    ],
+    "origine": "YC IMMOBILIER",
+    "notes": "Locataires en place, loyer CC 100kF. Résidence récente, 1er étage, ascenseur, 2 parkings couverts, terrasse 18m².",
+    "lat": -22.256,
+    "lng": 166.4136,
+    "etage": null,
+    "etat": "bon",
+    "travaux_estimes": 0,
+    "charges_mensuelles": 0,
+    "taxe_fonciere_annuelle": 0,
+    "parking": false,
+    "meuble": false,
+    "date_ajout": "2026-04-07"
+  },
+  {
+    "id": "immobilier_nc_504245",
+    "titre": "Appt F4+mezzanine — Val Plaisance",
+    "type_bien": "appartement",
+    "quartier": "val-plaisance",
+    "adresse": "Val Plaisance, Nouméa",
+    "prix_vente": 37000000,
+    "surface_m2": 108,
+    "nb_pieces": 4,
+    "nb_chambres": 3,
+    "loyer_mensuel_estime": 135000,
+    "loyer_reel": null,
+    "donnees_estimees": true,
+    "source": "immobilier.nc",
+    "ref": "504245",
+    "url_annonce": "https://www.immobilier.nc/posts/offers/504245",
+    "photos": [
+      "https://www.bienmeloger.nc/media/139/9f96a2f5-5305-4cbe-8d7d-d8607e83dbd9-202604070139.jpeg",
+      "https://www.bienmeloger.nc/media/138/64dae5f4-28c1-4acb-a6e1-bbb3d079385a-202604070138.jpeg",
+      "https://www.bienmeloger.nc/media/138/62f9790e-4351-400b-b98b-b0b1e769d8c6-202604070138.jpeg"
+    ],
+    "origine": "NOUMEA IMMOBILIER",
+    "notes": "F4+mezzanine 108m², 2e étage, résidence sécurisée, terrasse 10m², 2 parkings, cellier.",
+    "lat": -22.2792,
+    "lng": 166.4528,
+    "etage": null,
+    "etat": "bon",
+    "travaux_estimes": 0,
+    "charges_mensuelles": 0,
+    "taxe_fonciere_annuelle": 0,
+    "parking": false,
+    "meuble": false,
+    "date_ajout": "2026-04-07"
+  },
+  {
+    "id": "immobilier_nc_431501",
+    "titre": "Appt F2 — Vallée des Colons",
+    "type_bien": "appartement",
+    "quartier": "vallee-des-colons",
+    "adresse": "Vallée des Colons, Nouméa",
+    "prix_vente": 7500000,
+    "surface_m2": null,
+    "nb_pieces": 2,
+    "nb_chambres": 1,
+    "loyer_mensuel_estime": 85000,
+    "loyer_reel": null,
+    "donnees_estimees": true,
+    "source": "immobilier.nc",
+    "ref": "431501",
+    "url_annonce": "https://www.immobilier.nc/posts/offers/431501",
+    "photos": [
+      "https://gestion.immobilier.nc/photos.immobilier.nc/2024/5/o_1huu645ce55119r5th211n96oje.jpg",
+      "https://gestion.immobilier.nc/photos.immobilier.nc/2024/5/o_1huu645cf1v2e6b57g5vp19jph.JPG"
+    ],
+    "origine": "BienImmo",
+    "notes": "F2 rdc, cuisine, séjour, 1 chambre, terrasse avant et jardin arrière. Petit prix.",
+    "lat": -22.268,
+    "lng": 166.4526,
+    "etage": null,
+    "etat": "bon",
+    "travaux_estimes": 0,
+    "charges_mensuelles": 0,
+    "taxe_fonciere_annuelle": 0,
+    "parking": false,
+    "meuble": false,
+    "date_ajout": "2026-04-07"
+  },
+  {
+    "id": "immobilier_nc_503185",
+    "titre": "Maison F4 — P.K.6",
+    "type_bien": "maison",
+    "quartier": "pk6",
+    "adresse": "P.K.6, Nouméa",
+    "prix_vente": 37000000,
+    "surface_m2": 140,
+    "nb_pieces": 4,
+    "nb_chambres": 3,
+    "loyer_mensuel_estime": 135000,
+    "loyer_reel": null,
+    "donnees_estimees": true,
+    "source": "immobilier.nc",
+    "ref": "503185",
+    "url_annonce": "https://www.immobilier.nc/posts/offers/503185",
+    "photos": [
+      "https://www.bienmeloger.nc/media/107/095f789d-049b-4317-ad80-994e0cf455ed-202603110107.jpeg"
+    ],
+    "origine": "Acti Immo",
+    "notes": "Maison F4 construction traditionnelle 140m² au 6ème km.",
+    "lat": -22.262,
+    "lng": 166.4241,
+    "etage": null,
+    "etat": "bon",
+    "travaux_estimes": 0,
+    "charges_mensuelles": 0,
+    "taxe_fonciere_annuelle": 0,
+    "parking": false,
+    "meuble": false,
+    "date_ajout": "2026-04-07"
+  },
+  {
+    "id": "immobilier_nc_503716",
+    "titre": "Appt F1+mezz — Quartier Latin",
+    "type_bien": "appartement",
+    "quartier": "quartier-latin",
+    "adresse": "Quartier Latin, Nouméa",
+    "prix_vente": 9900000,
+    "surface_m2": 35,
+    "nb_pieces": 1,
+    "nb_chambres": 1,
+    "loyer_mensuel_estime": 65000,
+    "loyer_reel": null,
+    "donnees_estimees": true,
+    "source": "immobilier.nc",
+    "ref": "503716",
+    "url_annonce": "https://www.immobilier.nc/posts/offers/503716",
+    "photos": [
+      "https://www.bienmeloger.nc/media/304/f66e67c2-f019-4f61-8e7c-506fde6f191c-202603181304.jpeg"
+    ],
+    "origine": "Acti Immo",
+    "notes": "BONNE AFFAIRE ! F1+mezzanine 35m² au Quartier Latin. Idéal investissement locatif.",
+    "lat": -22.261,
+    "lng": 166.444,
+    "etage": null,
+    "etat": "bon",
+    "travaux_estimes": 0,
+    "charges_mensuelles": 0,
+    "taxe_fonciere_annuelle": 0,
+    "parking": false,
+    "meuble": false,
+    "date_ajout": "2026-04-07"
+  },
+  {
+    "id": "immobilier_nc_503190",
+    "titre": "Maison F4 — Rivière Salée",
+    "type_bien": "maison",
+    "quartier": "riviere-salee",
+    "adresse": "Rivière Salée, Nouméa",
+    "prix_vente": 24900000,
+    "surface_m2": 96,
+    "nb_pieces": 4,
+    "nb_chambres": 3,
+    "loyer_mensuel_estime": 130000,
+    "loyer_reel": null,
+    "donnees_estimees": true,
+    "source": "immobilier.nc",
+    "ref": "503190",
+    "url_annonce": "https://www.immobilier.nc/posts/offers/503190",
+    "photos": [
+      "https://www.bienmeloger.nc/media/713/592fa021-6000-4b9b-93ad-e730426feeaf-202601271713.jpeg"
+    ],
+    "origine": "Acti Immo",
+    "notes": "Rivière Salée 1er secteur, rue calme, 5 ares 27, maison F4 96m² construction traditionnelle.",
+    "lat": -22.2545,
+    "lng": 166.4262,
+    "etage": null,
+    "etat": "bon",
+    "travaux_estimes": 0,
+    "charges_mensuelles": 0,
+    "taxe_fonciere_annuelle": 0,
+    "parking": false,
+    "meuble": false,
+    "date_ajout": "2026-04-07"
+  },
+  {
+    "id": "immobilier_nc_503197",
+    "titre": "Appt F4 — Vallée de Tina",
+    "type_bien": "appartement",
+    "quartier": "vallee-de-tina",
+    "adresse": "Vallée de Tina, Nouméa",
+    "prix_vente": 34500000,
+    "surface_m2": 100,
+    "nb_pieces": 4,
+    "nb_chambres": 3,
+    "loyer_mensuel_estime": 135000,
+    "loyer_reel": null,
+    "donnees_estimees": true,
+    "source": "immobilier.nc",
+    "ref": "503197",
+    "url_annonce": "https://www.immobilier.nc/posts/offers/503197",
+    "photos": [
+      "https://www.bienmeloger.nc/media/649/291cd470-c846-4758-906a-d573d93576c8-202601271649.jpeg"
+    ],
+    "origine": "Acti Immo",
+    "notes": "Appt F4 100m² résidence bien entretenue avec ascenseur, Vallée de Tina.",
+    "lat": -22.2481,
+    "lng": 166.4617,
+    "etage": null,
+    "etat": "bon",
+    "travaux_estimes": 0,
+    "charges_mensuelles": 0,
+    "taxe_fonciere_annuelle": 0,
+    "parking": false,
+    "meuble": false,
+    "date_ajout": "2026-04-07"
+  },
+  {
+    "id": "immobilier_nc_502039",
+    "titre": "Appt F3 — Magenta",
+    "type_bien": "appartement",
+    "quartier": "magenta",
+    "adresse": "Magenta, Nouméa",
+    "prix_vente": 23500000,
+    "surface_m2": 60,
+    "nb_pieces": 3,
+    "nb_chambres": 2,
+    "loyer_mensuel_estime": 110000,
+    "loyer_reel": null,
+    "donnees_estimees": true,
+    "source": "immobilier.nc",
+    "ref": "502039",
+    "url_annonce": "https://www.immobilier.nc/posts/offers/502039",
+    "photos": [
+      "https://www.bienmeloger.nc/media/143/5a867b71-40dd-4732-b73f-4a75fcc2d030-202601272143.jpeg"
+    ],
+    "origine": "PROMOBAT",
+    "notes": "À deux pas des commodités et de la plage de Magenta, F3 60m².",
+    "lat": -22.26922,
+    "lng": 166.43714,
+    "etage": null,
+    "etat": "bon",
+    "travaux_estimes": 0,
+    "charges_mensuelles": 0,
+    "taxe_fonciere_annuelle": 0,
+    "parking": false,
+    "meuble": false,
+    "date_ajout": "2026-04-07"
+  },
+  {
+    "id": "immobilier_nc_502031",
+    "titre": "Appt F4 — Nouville",
+    "type_bien": "appartement",
+    "quartier": "nouville",
+    "adresse": "Nouville, Nouméa",
+    "prix_vente": 39900000,
+    "surface_m2": 101,
+    "nb_pieces": 4,
+    "nb_chambres": 3,
+    "loyer_mensuel_estime": 140000,
+    "loyer_reel": null,
+    "donnees_estimees": true,
+    "source": "immobilier.nc",
+    "ref": "502031",
+    "url_annonce": "https://www.immobilier.nc/posts/offers/502031",
+    "photos": [
+      "https://www.bienmeloger.nc/media/143/0a1b2c3d-0000-0000-0000-000000000000-202601272143.jpeg"
+    ],
+    "origine": "PROMOBAT",
+    "notes": "Appt F4 101m² Nouville, résidence sécurisée.",
+    "lat": -22.25512,
+    "lng": 166.41264,
+    "etage": null,
+    "etat": "bon",
+    "travaux_estimes": 0,
+    "charges_mensuelles": 0,
+    "taxe_fonciere_annuelle": 0,
+    "parking": false,
+    "meuble": false,
+    "date_ajout": "2026-04-07"
+  },
+  {
+    "id": "immobilier_nc_505538",
+    "titre": "Appt F1 — Vallée des Colons",
+    "type_bien": "appartement",
+    "quartier": "vallee-des-colons",
+    "adresse": "Vallée des Colons, Nouméa",
+    "prix_vente": 7500000,
+    "surface_m2": 22,
+    "nb_pieces": 1,
+    "nb_chambres": 1,
+    "loyer_mensuel_estime": 60000,
+    "loyer_reel": null,
+    "donnees_estimees": true,
+    "source": "immobilier.nc",
+    "ref": "505538",
+    "url_annonce": "https://www.immobilier.nc/posts/offers/505538",
+    "photos": [],
+    "origine": "PROMOBAT",
+    "notes": "Petit studio F1 22m² Vallée des Colons. Très petit prix.",
+    "lat": -22.26712,
+    "lng": 166.45164,
+    "etage": null,
+    "etat": "bon",
+    "travaux_estimes": 0,
+    "charges_mensuelles": 0,
+    "taxe_fonciere_annuelle": 0,
+    "parking": false,
+    "meuble": false,
+    "date_ajout": "2026-04-07"
+  },
+  {
+    "id": "immobilier_nc_480542",
+    "titre": "Appt F3 — Port Plaisance",
+    "type_bien": "appartement",
+    "quartier": "port-plaisance",
+    "adresse": "Port Plaisance, Nouméa",
+    "prix_vente": 33970000,
+    "surface_m2": 71,
+    "nb_pieces": 3,
+    "nb_chambres": 2,
+    "loyer_mensuel_estime": 120000,
+    "loyer_reel": null,
+    "donnees_estimees": true,
+    "source": "immobilier.nc",
+    "ref": "480542",
+    "url_annonce": "https://www.immobilier.nc/posts/offers/480542",
+    "photos": [],
+    "origine": "LUXURY IMMOBILIER",
+    "notes": "Appt F3 71m² Port Plaisance. Vue mer possible.",
+    "lat": -22.2912,
+    "lng": 166.4472,
+    "etage": null,
+    "etat": "bon",
+    "travaux_estimes": 0,
+    "charges_mensuelles": 0,
+    "taxe_fonciere_annuelle": 0,
+    "parking": false,
+    "meuble": false,
+    "date_ajout": "2026-04-07"
+  },
+  {
+    "id": "immobilier_nc_499995",
+    "titre": "Maison F4 — P.K.7",
+    "type_bien": "maison",
+    "quartier": "pk7",
+    "adresse": "P.K.7, Nouméa",
+    "prix_vente": 31900000,
+    "surface_m2": 105,
+    "nb_pieces": 4,
+    "nb_chambres": 3,
+    "loyer_mensuel_estime": 135000,
+    "loyer_reel": null,
+    "donnees_estimees": true,
+    "source": "immobilier.nc",
+    "ref": "499995",
+    "url_annonce": "https://www.immobilier.nc/posts/offers/499995",
+    "photos": [],
+    "origine": "LUXURY IMMOBILIER",
+    "notes": "Maison F4 105m² au P.K.7, quartier résidentiel.",
+    "lat": -22.2672,
+    "lng": 166.4167,
+    "etage": null,
+    "etat": "bon",
+    "travaux_estimes": 0,
+    "charges_mensuelles": 0,
+    "taxe_fonciere_annuelle": 0,
+    "parking": false,
+    "meuble": false,
+    "date_ajout": "2026-04-07"
+  },
+  {
+    "id": "immobilier_nc_493090",
+    "titre": "Appt F2 — P.K.7",
+    "type_bien": "appartement",
+    "quartier": "pk7",
+    "adresse": "P.K.7, Nouméa",
+    "prix_vente": 14215000,
+    "surface_m2": 42,
+    "nb_pieces": 2,
+    "nb_chambres": 1,
+    "loyer_mensuel_estime": 80000,
+    "loyer_reel": null,
+    "donnees_estimees": true,
+    "source": "immobilier.nc",
+    "ref": "493090",
+    "url_annonce": "https://www.immobilier.nc/posts/offers/493090",
+    "photos": [
+      "https://gestion.immobilier.nc/photos.immobilier.nc/2025/10/o_1j6u6msdt1ts61fve17a36kl159lj.jpg"
+    ],
+    "origine": "LUXURY IMMOBILIER",
+    "notes": "Idéal premier achat ou investissement locatif. F2 42m² résidence sécurisée, climatisé, parking.",
+    "lat": -22.26632,
+    "lng": 166.41574,
+    "etage": null,
+    "etat": "bon",
+    "travaux_estimes": 0,
+    "charges_mensuelles": 0,
+    "taxe_fonciere_annuelle": 0,
+    "parking": false,
+    "meuble": false,
+    "date_ajout": "2026-04-07"
+  },
+  {
+    "id": "immobilier_nc_504688",
+    "titre": "Appt F2 — Faubourg Blanchot",
+    "type_bien": "appartement",
+    "quartier": "faubourg-blanchot",
+    "adresse": "Faubourg Blanchot, Nouméa",
+    "prix_vente": 15800000,
+    "surface_m2": 44,
+    "nb_pieces": 2,
+    "nb_chambres": 1,
+    "loyer_mensuel_estime": 85000,
+    "loyer_reel": null,
+    "donnees_estimees": true,
+    "source": "immobilier.nc",
+    "ref": "504688",
+    "url_annonce": "https://www.immobilier.nc/posts/offers/504688",
+    "photos": [
+      "https://www.bienmeloger.nc/media/816/e08dbf09-f195-475b-8db5-7d083e08bf22-202604021816.jpeg"
+    ],
+    "origine": "Cabinet LACROIX",
+    "notes": "Exclusivité. Appt F2 44m² au 2e étage, Faubourg Blanchot.",
+    "lat": -22.2714,
+    "lng": 166.4475,
+    "etage": null,
+    "etat": "bon",
+    "travaux_estimes": 0,
+    "charges_mensuelles": 0,
+    "taxe_fonciere_annuelle": 0,
+    "parking": false,
+    "meuble": false,
+    "date_ajout": "2026-04-07"
+  },
+  {
+    "id": "immobilier_nc_504358",
+    "titre": "Appt F3 — Centre-Ville",
+    "type_bien": "appartement",
+    "quartier": "centre-ville",
+    "adresse": "Centre-Ville, Nouméa",
+    "prix_vente": 13500000,
+    "surface_m2": 55,
+    "nb_pieces": 3,
+    "nb_chambres": 2,
+    "loyer_mensuel_estime": 110000,
+    "loyer_reel": null,
+    "donnees_estimees": true,
+    "source": "immobilier.nc",
+    "ref": "504358",
+    "url_annonce": "https://www.immobilier.nc/posts/offers/504358",
+    "photos": [],
+    "origine": "Cabinet LACROIX",
+    "notes": "Appt F3 55m² Centre-Ville. Excellent rapport prix/surface.",
+    "lat": -22.2737,
+    "lng": 166.4474,
+    "etage": null,
+    "etat": "bon",
+    "travaux_estimes": 0,
+    "charges_mensuelles": 0,
+    "taxe_fonciere_annuelle": 0,
+    "parking": false,
+    "meuble": false,
+    "date_ajout": "2026-04-07"
+  },
+  {
+    "id": "immobilier_nc_503313",
+    "titre": "Appt F3 — Val Plaisance",
+    "type_bien": "appartement",
+    "quartier": "val-plaisance",
+    "adresse": "Val Plaisance, Nouméa",
+    "prix_vente": 28200000,
+    "surface_m2": 92,
+    "nb_pieces": 3,
+    "nb_chambres": 2,
+    "loyer_mensuel_estime": 120000,
+    "loyer_reel": null,
+    "donnees_estimees": true,
+    "source": "immobilier.nc",
+    "ref": "503313",
+    "url_annonce": "https://www.immobilier.nc/posts/offers/503313",
+    "photos": [],
+    "origine": "Cabinet LACROIX",
+    "notes": "Appt F3 92m² Val Plaisance, résidence calme et sécurisée.",
+    "lat": -22.27832,
+    "lng": 166.45184,
+    "etage": null,
+    "etat": "bon",
+    "travaux_estimes": 0,
+    "charges_mensuelles": 0,
+    "taxe_fonciere_annuelle": 0,
+    "parking": false,
+    "meuble": false,
+    "date_ajout": "2026-04-07"
+  },
+  {
+    "id": "immobilier_nc_497267",
+    "titre": "Maison F4 — P.K.6",
+    "type_bien": "maison",
+    "quartier": "pk6",
+    "adresse": "P.K.6, Nouméa",
+    "prix_vente": 22600000,
+    "surface_m2": null,
+    "nb_pieces": 4,
+    "nb_chambres": 3,
+    "loyer_mensuel_estime": 130000,
+    "loyer_reel": null,
+    "donnees_estimees": true,
+    "source": "immobilier.nc",
+    "ref": "497267",
+    "url_annonce": "https://www.immobilier.nc/posts/offers/497267",
+    "photos": [],
+    "origine": "BienImmo",
+    "notes": "Maison F4 au P.K.6.",
+    "lat": -22.26112,
+    "lng": 166.42314,
+    "etage": null,
+    "etat": "bon",
+    "travaux_estimes": 0,
+    "charges_mensuelles": 0,
+    "taxe_fonciere_annuelle": 0,
+    "parking": false,
+    "meuble": false,
+    "date_ajout": "2026-04-07"
+  },
+  {
+    "id": "immobilier_nc_484009",
+    "titre": "Appt F3 — Vallée des Colons",
+    "type_bien": "appartement",
+    "quartier": "vallee-des-colons",
+    "adresse": "Vallée des Colons, Nouméa",
+    "prix_vente": 17300000,
+    "surface_m2": null,
+    "nb_pieces": 3,
+    "nb_chambres": 2,
+    "loyer_mensuel_estime": 105000,
+    "loyer_reel": null,
+    "donnees_estimees": true,
+    "source": "immobilier.nc",
+    "ref": "484009",
+    "url_annonce": "https://www.immobilier.nc/posts/offers/484009",
+    "photos": [],
+    "origine": "BienImmo",
+    "lat": -22.2693,
+    "lng": 166.45271,
+    "etage": null,
+    "etat": "bon",
+    "travaux_estimes": 0,
+    "charges_mensuelles": 0,
+    "taxe_fonciere_annuelle": 0,
+    "parking": false,
+    "meuble": false,
+    "date_ajout": "2026-04-07",
+    "notes": ""
+  },
+  {
+    "id": "immobilier_nc_495953",
+    "titre": "Maison F4 — Logicoop",
+    "type_bien": "maison",
+    "quartier": "motor-pool",
+    "adresse": "Logicoop, Nouméa",
+    "prix_vente": 16900000,
+    "surface_m2": null,
+    "nb_pieces": 4,
+    "nb_chambres": 3,
+    "loyer_mensuel_estime": 125000,
+    "loyer_reel": null,
+    "donnees_estimees": true,
+    "source": "immobilier.nc",
+    "ref": "495953",
+    "url_annonce": "https://www.immobilier.nc/posts/offers/495953",
+    "photos": [],
+    "origine": "BienImmo",
+    "notes": "Maison F4 Logicoop. Bon rapport qualité/prix.",
+    "lat": -22.2673,
+    "lng": 166.4355,
+    "etage": null,
+    "etat": "bon",
+    "travaux_estimes": 0,
+    "charges_mensuelles": 0,
+    "taxe_fonciere_annuelle": 0,
+    "parking": false,
+    "meuble": false,
+    "date_ajout": "2026-04-07"
+  },
+  {
+    "id": "immobilier_nc_498026",
+    "titre": "Appt F3 — Ouémo",
+    "type_bien": "appartement",
+    "quartier": "ouemo",
+    "adresse": "Ouémo, Nouméa",
+    "prix_vente": 29990000,
+    "surface_m2": 71,
+    "nb_pieces": 3,
+    "nb_chambres": 2,
+    "loyer_mensuel_estime": 115000,
+    "loyer_reel": null,
+    "donnees_estimees": true,
+    "source": "immobilier.nc",
+    "ref": "498026",
+    "url_annonce": "https://www.immobilier.nc/posts/offers/498026",
+    "photos": [],
+    "origine": "DIOT",
+    "notes": "Appt F3 71m² Ouémo.",
+    "lat": -22.259,
+    "lng": 166.4581,
+    "etage": null,
+    "etat": "bon",
+    "travaux_estimes": 0,
+    "charges_mensuelles": 0,
+    "taxe_fonciere_annuelle": 0,
+    "parking": false,
+    "meuble": false,
+    "date_ajout": "2026-04-07"
+  },
+  {
+    "id": "immobilier_nc_504948",
+    "titre": "Maison F4 — Kaméré",
+    "type_bien": "maison",
+    "quartier": "6eme-km",
+    "adresse": "Kaméré, Nouméa",
+    "prix_vente": 24000000,
+    "surface_m2": 160,
+    "nb_pieces": 4,
+    "nb_chambres": 3,
+    "loyer_mensuel_estime": 140000,
+    "loyer_reel": null,
+    "donnees_estimees": true,
+    "source": "immobilier.nc",
+    "ref": "504948",
+    "url_annonce": "https://www.immobilier.nc/posts/offers/504948",
+    "photos": [],
+    "origine": "Nathalie",
+    "notes": "Grande maison F4 160m² Kaméré. Excellent rapport surface/prix.",
+    "lat": -22.2581,
+    "lng": 166.4234,
+    "etage": null,
+    "etat": "bon",
+    "travaux_estimes": 0,
+    "charges_mensuelles": 0,
+    "taxe_fonciere_annuelle": 0,
+    "parking": false,
+    "meuble": false,
+    "date_ajout": "2026-04-07"
+  },
+  {
+    "id": "immobilier_nc_496673",
+    "titre": "Appt F3 — Nouméa",
+    "type_bien": "appartement",
+    "quartier": "centre-ville",
+    "adresse": "Nouméa",
+    "prix_vente": 13900000,
+    "surface_m2": 66,
+    "nb_pieces": 3,
+    "nb_chambres": 2,
+    "loyer_mensuel_estime": 110000,
+    "loyer_reel": null,
+    "donnees_estimees": true,
+    "source": "immobilier.nc",
+    "ref": "496673",
+    "url_annonce": "https://www.immobilier.nc/posts/offers/496673",
+    "photos": [],
+    "origine": "Nathalie",
+    "notes": "Appt F3 66m².",
+    "lat": -22.27282,
+    "lng": 166.44644,
+    "etage": null,
+    "etat": "bon",
+    "travaux_estimes": 0,
+    "charges_mensuelles": 0,
+    "taxe_fonciere_annuelle": 0,
+    "parking": false,
+    "meuble": false,
+    "date_ajout": "2026-04-07"
+  },
+  {
+    "id": "immobilier_nc_503693",
+    "titre": "Appt F3 — Trianon",
+    "type_bien": "appartement",
+    "quartier": "trianon",
+    "adresse": "Trianon, Nouméa",
+    "prix_vente": 29900000,
+    "surface_m2": 60,
+    "nb_pieces": 3,
+    "nb_chambres": 2,
+    "loyer_mensuel_estime": 115000,
+    "loyer_reel": null,
+    "donnees_estimees": true,
+    "source": "immobilier.nc",
+    "ref": "503693",
+    "url_annonce": "https://www.immobilier.nc/posts/offers/503693",
+    "photos": [],
+    "origine": "OPEN IMMOBILIER",
+    "notes": "Appt F3 60m² Trianon.",
+    "lat": -22.2608,
+    "lng": 166.459,
+    "etage": null,
+    "etat": "bon",
+    "travaux_estimes": 0,
+    "charges_mensuelles": 0,
+    "taxe_fonciere_annuelle": 0,
+    "parking": false,
+    "meuble": false,
+    "date_ajout": "2026-04-07"
+  },
+  {
+    "id": "immonc_5331509",
+    "titre": "Maison F3 — Trianon",
+    "type_bien": "maison",
+    "quartier": "trianon",
+    "adresse": "Trianon, Nouméa",
+    "prix_vente": 24900000,
+    "surface_m2": null,
+    "nb_pieces": 3,
+    "nb_chambres": 2,
+    "loyer_mensuel_estime": 125000,
+    "loyer_reel": null,
+    "donnees_estimees": true,
+    "source": "immonc.com",
+    "ref": "5331509",
+    "url_annonce": "https://www.immonc.com/annonce-5331509-immobilier-vente-maison-f3-noumea-trianon",
+    "photos": [],
+    "origine": "Cabinet Lacroix",
+    "notes": "Bas de villa F3 104m² Trianon. Exclusivité Cabinet Lacroix.",
+    "lat": -22.25992,
+    "lng": 166.45804,
+    "etage": null,
+    "etat": "bon",
+    "travaux_estimes": 0,
+    "charges_mensuelles": 0,
+    "taxe_fonciere_annuelle": 0,
+    "parking": false,
+    "meuble": false,
+    "date_ajout": "2026-04-07"
+  },
+  {
+    "id": "immonc_5331378",
+    "titre": "Appt F3 — Vallée des Colons",
+    "type_bien": "appartement",
+    "quartier": "vallee-des-colons",
+    "adresse": "Vallée des Colons, Nouméa",
+    "prix_vente": 21900000,
+    "surface_m2": null,
+    "nb_pieces": 3,
+    "nb_chambres": 2,
+    "loyer_mensuel_estime": 110000,
+    "loyer_reel": null,
+    "donnees_estimees": true,
+    "source": "immonc.com",
+    "ref": "5331378",
+    "url_annonce": "https://www.immonc.com/annonce-5331378-immobilier-vente-appartement-f3-noumea-vallee-des-colons",
+    "photos": [],
+    "origine": "Cabinet Lacroix",
+    "lat": -22.26697,
+    "lng": 166.45339,
+    "etage": null,
+    "etat": "bon",
+    "travaux_estimes": 0,
+    "charges_mensuelles": 0,
+    "taxe_fonciere_annuelle": 0,
+    "parking": false,
+    "meuble": false,
+    "date_ajout": "2026-04-07",
+    "notes": ""
+  },
+  {
+    "id": "immonc_5331173",
+    "titre": "Appt F2 — Ouémo",
+    "type_bien": "appartement",
+    "quartier": "ouemo",
+    "adresse": "Ouémo, Nouméa",
+    "prix_vente": 11000000,
+    "surface_m2": null,
+    "nb_pieces": 2,
+    "nb_chambres": 1,
+    "loyer_mensuel_estime": 85000,
+    "loyer_reel": null,
+    "donnees_estimees": true,
+    "source": "immonc.com",
+    "ref": "5331173",
+    "url_annonce": "https://www.immonc.com/annonce-5331173-immobilier-vente-appartement-f2-noumea-ouemo",
+    "photos": [],
+    "origine": "Cabinet Lacroix",
+    "lat": -22.25812,
+    "lng": 166.45714,
+    "etage": null,
+    "etat": "bon",
+    "travaux_estimes": 0,
+    "charges_mensuelles": 0,
+    "taxe_fonciere_annuelle": 0,
+    "parking": false,
+    "meuble": false,
+    "date_ajout": "2026-04-07",
+    "notes": ""
+  }
+,
+    {
+    "id": "immobilier_nc_504335",
+    "titre": "F1 Quartier Latin (9.9 MF)",
+    "type_bien": "appartement",
+    "quartier": "quartier-latin",
+    "adresse": "Quartier Latin, Nouméa",
+    "lat": -22.2768,
+    "lng": 166.4487,
+    "prix_vente": 9900000,
+    "surface_m2": 35,
+    "nb_pieces": 1,
+    "nb_chambres": 1,
+    "etage": null,
+    "annee_construction": null,
+    "etat": "bon",
+    "travaux_estimes": 0,
+    "loyer_mensuel_estime": 65000,
+    "charges_mensuelles": 15000,
+    "taxe_fonciere_annuelle": 80000,
+    "parking": false,
+    "meuble": false,
+    "source": "immobilier.nc",
+    "ref": "504335",
+    "url_annonce": "https://www.immobilier.nc/posts/offers/504335",
+    "date_ajout": "2026-04-08",
+    "photos": [
+        "https://www.bienmeloger.nc/media/445/7ee35090-bdc4-4976-a04a-5e5b74f19e08-202603261445.jpeg",
+        "https://www.bienmeloger.nc/media/445/72c7cc9d-1d42-4b33-9f8b-5f480e6b743e-202603261445.jpeg",
+        "https://www.bienmeloger.nc/media/445/ae98146b-58f8-4a1e-929e-71b10a11b6da-202603261445.jpeg"
+    ],
+    "donnees_estimees": false,
+    "origine": "veille",
+    "notes": ""
+},
+    {
+    "id": "immobilier_nc_485431",
+    "titre": "F2 Baie Des Citrons (17.5 MF)",
+    "type_bien": "appartement",
+    "quartier": "baie-des-citrons",
+    "adresse": "Baie Des Citrons, Nouméa",
+    "lat": -22.2902,
+    "lng": 166.4383,
+    "prix_vente": 17500000,
+    "surface_m2": 37,
+    "nb_pieces": 2,
+    "nb_chambres": 1,
+    "etage": null,
+    "annee_construction": null,
+    "etat": "bon",
+    "travaux_estimes": 0,
+    "loyer_mensuel_estime": 95000,
+    "charges_mensuelles": 15000,
+    "taxe_fonciere_annuelle": 80000,
+    "parking": true,
+    "meuble": true,
+    "source": "immobilier.nc",
+    "ref": "485431",
+    "url_annonce": "https://www.immobilier.nc/posts/offers/485431",
+    "date_ajout": "2026-04-08",
+    "photos": [
+        "https://gestion.immobilier.nc/photos.immobilier.nc/2025/7/o_1ivrcdtut1q4u1o4a1tso1fifp1n.jpg",
+        "https://gestion.immobilier.nc/photos.immobilier.nc/2025/7/o_1ivrcdtut753j1tqgu1s4tvbv1p.jpg",
+        "https://gestion.immobilier.nc/photos.immobilier.nc/2025/7/o_1ivrcdtut16h61apc12lm3g21cdd1o.jpg"
+    ],
+    "donnees_estimees": false,
+    "origine": "veille",
+    "notes": ""
+},
+    {
+    "id": "immobilier_nc_498772",
+    "titre": "F2 Noumea (11 MF)",
+    "type_bien": "appartement",
+    "quartier": "noumea",
+    "adresse": "Noumea, Nouméa",
+    "lat": -22.2703,
+    "lng": 166.4464,
+    "prix_vente": 11000000,
+    "surface_m2": 51,
+    "nb_pieces": 2,
+    "nb_chambres": 1,
+    "etage": null,
+    "annee_construction": null,
+    "etat": "bon",
+    "travaux_estimes": 0,
+    "loyer_mensuel_estime": 95000,
+    "charges_mensuelles": 15000,
+    "taxe_fonciere_annuelle": 80000,
+    "parking": false,
+    "meuble": false,
+    "source": "immobilier.nc",
+    "ref": "498772",
+    "url_annonce": "https://www.immobilier.nc/posts/offers/498772",
+    "date_ajout": "2026-04-08",
+    "photos": [
+        "https://gestion.immobilier.nc/photos.immobilier.nc/2025/12/o_1jcr8llf1e87dkdpig1cf41c3vb.jpeg",
+        "https://gestion.immobilier.nc/photos.immobilier.nc/2025/12/o_1jcr8llf11o6f1e4uro0ggj112g.jpeg"
+    ],
+    "donnees_estimees": false,
+    "origine": "veille",
+    "notes": ""
+},
+    {
+    "id": "immobilier_nc_498773",
+    "titre": "F4 Noumea (21 MF)",
+    "type_bien": "appartement",
+    "quartier": "noumea",
+    "adresse": "Noumea, Nouméa",
+    "lat": -22.27,
+    "lng": 166.4436,
+    "prix_vente": 21000000,
+    "surface_m2": 115,
+    "nb_pieces": 4,
+    "nb_chambres": 3,
+    "etage": null,
+    "annee_construction": null,
+    "etat": "bon",
+    "travaux_estimes": 0,
+    "loyer_mensuel_estime": 160000,
+    "charges_mensuelles": 15000,
+    "taxe_fonciere_annuelle": 80000,
+    "parking": false,
+    "meuble": false,
+    "source": "immobilier.nc",
+    "ref": "498773",
+    "url_annonce": "https://www.immobilier.nc/posts/offers/498773",
+    "date_ajout": "2026-04-08",
+    "photos": [
+        "https://gestion.immobilier.nc/photos.immobilier.nc/2025/12/o_1jcr8t3vc19ap197h1iuanmf15k1b.jpeg",
+        "https://gestion.immobilier.nc/photos.immobilier.nc/2025/12/o_1jcr8t3vc4ts1jia11nb1b2e1k8fg.jpeg"
+    ],
+    "donnees_estimees": false,
+    "origine": "veille",
+    "notes": ""
+},
+    {
+    "id": "immobilier_nc_498552",
+    "titre": "F3 Noumea (21 MF)",
+    "type_bien": "appartement",
+    "quartier": "noumea",
+    "adresse": "Noumea, Nouméa",
+    "lat": -22.2716,
+    "lng": 166.4454,
+    "prix_vente": 21000000,
+    "surface_m2": 63,
+    "nb_pieces": 3,
+    "nb_chambres": 2,
+    "etage": null,
+    "annee_construction": null,
+    "etat": "bon",
+    "travaux_estimes": 0,
+    "loyer_mensuel_estime": 130000,
+    "charges_mensuelles": 15000,
+    "taxe_fonciere_annuelle": 80000,
+    "parking": true,
+    "meuble": false,
+    "source": "immobilier.nc",
+    "ref": "498552",
+    "url_annonce": "https://www.immobilier.nc/posts/offers/498552",
+    "date_ajout": "2026-04-08",
+    "photos": [
+        "https://gestion.immobilier.nc/photos.immobilier.nc/2025/12/o_1jco9h3go12dk1n3v1jf51gq216r0b.jpeg",
+        "https://gestion.immobilier.nc/photos.immobilier.nc/2025/12/o_1jco9h3go1a8t1e0v1qim1qrp1nqeg.jpeg"
+    ],
+    "donnees_estimees": false,
+    "origine": "veille",
+    "notes": ""
+},
+    {
+    "id": "immobilier_nc_499039",
+    "titre": "F3 Noumea (24.8 MF)",
+    "type_bien": "maison",
+    "quartier": "noumea",
+    "adresse": "Noumea, Nouméa",
+    "lat": -22.2717,
+    "lng": 166.4467,
+    "prix_vente": 24800000,
+    "surface_m2": 53,
+    "nb_pieces": 3,
+    "nb_chambres": 2,
+    "etage": null,
+    "annee_construction": null,
+    "etat": "bon",
+    "travaux_estimes": 0,
+    "loyer_mensuel_estime": 130000,
+    "charges_mensuelles": 15000,
+    "taxe_fonciere_annuelle": 80000,
+    "parking": false,
+    "meuble": false,
+    "source": "immobilier.nc",
+    "ref": "499039",
+    "url_annonce": "https://www.immobilier.nc/posts/offers/499039",
+    "date_ajout": "2026-04-08",
+    "photos": [
+        "https://gestion.immobilier.nc/photos.immobilier.nc/2025/12/o_1jd2q5f171qlc4fo1h3f1v0d14ppb.jpeg",
+        "https://gestion.immobilier.nc/photos.immobilier.nc/2025/12/o_1jd2q5f171omc1vl21s1h1fh5r9ug.jpeg"
+    ],
+    "donnees_estimees": false,
+    "origine": "veille",
+    "notes": ""
+},
+    {
+    "id": "immobilier_nc_492941",
+    "titre": "F6 Noumea (34.9 MF)",
+    "type_bien": "maison",
+    "quartier": "noumea",
+    "adresse": "Noumea, Nouméa",
+    "lat": -22.2688,
+    "lng": 166.4464,
+    "prix_vente": 34900000,
+    "surface_m2": 140,
+    "nb_pieces": 6,
+    "nb_chambres": 5,
+    "etage": null,
+    "annee_construction": null,
+    "etat": "bon",
+    "travaux_estimes": 0,
+    "loyer_mensuel_estime": 190000,
+    "charges_mensuelles": 15000,
+    "taxe_fonciere_annuelle": 80000,
+    "parking": false,
+    "meuble": false,
+    "source": "immobilier.nc",
+    "ref": "492941",
+    "url_annonce": "https://www.immobilier.nc/posts/offers/492941",
+    "date_ajout": "2026-04-08",
+    "photos": [
+        "https://gestion.immobilier.nc/photos.immobilier.nc/2025/10/o_1j8f5otij3uv1c3o13g918t5v4bb.jpeg",
+        "https://gestion.immobilier.nc/photos.immobilier.nc/2025/10/o_1j8f5otij1cg51odt1rrd102h11i5g.jpeg"
+    ],
+    "donnees_estimees": false,
+    "origine": "veille",
+    "notes": ""
+},
+    {
+    "id": "immobilier_nc_506121",
+    "titre": "F3 Noumea (18.99 MF)",
+    "type_bien": "appartement",
+    "quartier": "noumea",
+    "adresse": "Noumea, Nouméa",
+    "lat": -22.2716,
+    "lng": 166.447,
+    "prix_vente": 18990000,
+    "surface_m2": 90,
+    "nb_pieces": 3,
+    "nb_chambres": 2,
+    "etage": null,
+    "annee_construction": null,
+    "etat": "bon",
+    "travaux_estimes": 0,
+    "loyer_mensuel_estime": 130000,
+    "charges_mensuelles": 15000,
+    "taxe_fonciere_annuelle": 80000,
+    "parking": true,
+    "meuble": false,
+    "source": "immobilier.nc",
+    "ref": "506121",
+    "url_annonce": "https://www.immobilier.nc/posts/offers/506121",
+    "date_ajout": "2026-04-08",
+    "photos": [
+        "https://gestion.immobilier.nc/photos.immobilier.nc/2026/4/o_1jpgm4hoe1gpa1g231uo3i3t1s56b.jpeg",
+        "https://gestion.immobilier.nc/photos.immobilier.nc/2026/4/o_1jpgm4hoe15kk1ogm18oq1lf31fhgg.jpeg"
+    ],
+    "donnees_estimees": false,
+    "origine": "veille",
+    "notes": ""
+},
+    {
+    "id": "immobilier_nc_501835",
+    "titre": "F5 Noumea (37 MF)",
+    "type_bien": "maison",
+    "quartier": "noumea",
+    "adresse": "Noumea, Nouméa",
+    "lat": -22.2718,
+    "lng": 166.4465,
+    "prix_vente": 37000000,
+    "surface_m2": 180,
+    "nb_pieces": 5,
+    "nb_chambres": 4,
+    "etage": null,
+    "annee_construction": null,
+    "etat": "bon",
+    "travaux_estimes": 0,
+    "loyer_mensuel_estime": 190000,
+    "charges_mensuelles": 15000,
+    "taxe_fonciere_annuelle": 80000,
+    "parking": false,
+    "meuble": false,
+    "source": "immobilier.nc",
+    "ref": "501835",
+    "url_annonce": "https://www.immobilier.nc/posts/offers/501835",
+    "date_ajout": "2026-04-07",
+    "photos": [
+        "https://gestion.immobilier.nc/photos.immobilier.nc/2026/1/o_1je7tvqj014qo1tgr1bej1ejj33jb.jpeg",
+        "https://gestion.immobilier.nc/photos.immobilier.nc/2026/1/o_1je7tvqj0pk6q0l1aqp10t71g11g.jpeg"
+    ],
+    "donnees_estimees": false,
+    "origine": "veille",
+    "notes": ""
+},
+    {
+    "id": "immobilier_nc_504214",
+    "titre": "F2 Noumea (19 MF)",
+    "type_bien": "appartement",
+    "quartier": "noumea",
+    "adresse": "Noumea, Nouméa",
+    "lat": -22.2716,
+    "lng": 166.4454,
+    "prix_vente": 19000000,
+    "surface_m2": 47,
+    "nb_pieces": 2,
+    "nb_chambres": 1,
+    "etage": null,
+    "annee_construction": null,
+    "etat": "bon",
+    "travaux_estimes": 0,
+    "loyer_mensuel_estime": 95000,
+    "charges_mensuelles": 15000,
+    "taxe_fonciere_annuelle": 80000,
+    "parking": true,
+    "meuble": false,
+    "source": "immobilier.nc",
+    "ref": "504214",
+    "url_annonce": "https://www.immobilier.nc/posts/offers/504214",
+    "date_ajout": "2026-04-07",
+    "photos": [
+        "https://gestion.immobilier.nc/photos.immobilier.nc/2026/3/o_1jm3d1hg01u2r17to1hqm10s31cfeb.jpeg",
+        "https://gestion.immobilier.nc/photos.immobilier.nc/2026/3/o_1jm3d1hg01rao1bgh15gn19781g99g.jpeg"
+    ],
+    "donnees_estimees": false,
+    "origine": "veille",
+    "notes": ""
+},
+    {
+    "id": "immobilier_nc_487271",
+    "titre": "F2 Noumea (17.9 MF)",
+    "type_bien": "appartement",
+    "quartier": "noumea",
+    "adresse": "Noumea, Nouméa",
+    "lat": -22.2702,
+    "lng": 166.4457,
+    "prix_vente": 17900000,
+    "surface_m2": 0,
+    "nb_pieces": 2,
+    "nb_chambres": 1,
+    "etage": null,
+    "annee_construction": null,
+    "etat": "bon",
+    "travaux_estimes": 0,
+    "loyer_mensuel_estime": 95000,
+    "charges_mensuelles": 15000,
+    "taxe_fonciere_annuelle": 80000,
+    "parking": false,
+    "meuble": false,
+    "source": "immobilier.nc",
+    "ref": "487271",
+    "url_annonce": "https://www.immobilier.nc/posts/offers/487271",
+    "date_ajout": "2026-04-07",
+    "photos": [
+        "https://gestion.immobilier.nc/photos.immobilier.nc/2025/8/o_1j2di9cb516fk1ts616mt1fggei5b.jpeg",
+        "https://gestion.immobilier.nc/photos.immobilier.nc/2025/8/o_1j2di9neb20iktoor1mvmqpfg.jpeg"
+    ],
+    "donnees_estimees": false,
+    "origine": "veille",
+    "notes": ""
+}
+  ]
+};
+
+// ============================================
+//  FIREBASE CONFIGURATION
+// ============================================
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyB881x-o8Sgc-YENuYQRZW4acK0nokvOu8",
+  authDomain: "immo-noumea.firebaseapp.com",
+  databaseURL: "https://immo-noumea-default-rtdb.firebaseio.com",
+  projectId: "immo-noumea",
+  storageBucket: "immo-noumea.firebasestorage.app",
+  messagingSenderId: "1009473902024",
+  appId: "1:1009473902024:web:5e759579dcbe816a78dcfd"
+};
+
+let db = null;
+let firebaseReady = false;
+
+// In-memory caches (synced with Firebase in real-time)
+const fbData = {
+  statuts: {},
+  ratings_jev: {},
+  notes_jev: {},
+  ratings_mc: {},
+  notes_mc: {}
+};
+
+function initFirebase() {
+  try {
+    if (FIREBASE_CONFIG.apiKey === "VOTRE_API_KEY") {
+      console.warn("Firebase non configuré — mode local (localStorage)");
+      loadFromLocalStorage();
+      updateConnBadge(false);
+      return;
+    }
+    firebase.initializeApp(FIREBASE_CONFIG);
+    db = firebase.database();
+
+    // Listen to connection state
+    db.ref('.info/connected').on('value', snap => {
+      updateConnBadge(snap.val() === true);
+    });
+
+    // Real-time listeners for each data path
+    ['statuts', 'ratings_jev', 'notes_jev', 'ratings_mc', 'notes_mc'].forEach(path => {
+      db.ref(path).on('value', snap => {
+        fbData[path] = snap.val() || {};
+        // Refresh UI when data changes (from other user)
+        if (typeof renderTable === 'function' && document.getElementById('table-body')) {
+          renderTable();
+        }
+        if (typeof applyFilters === 'function') {
+          try { applyFilters(); } catch(e) {}
+        }
+      });
+    });
+
+    firebaseReady = true;
+    console.log("Firebase connecté ✅");
+
+    // Migration localStorage → Firebase (une seule fois)
+    setTimeout(() => migrateLocalStorageToFirebase(), 2000);
+  } catch(e) {
+    console.error("Erreur Firebase:", e);
+    loadFromLocalStorage();
+    updateConnBadge(false);
+  }
+}
+
+// Migration: push localStorage data to Firebase (runs once per browser)
+function migrateLocalStorageToFirebase() {
+  if (!firebaseReady || !db) return;
+  if (localStorage.getItem('immo_nc_migrated_to_fb') === 'true') return;
+  const lsMap = {
+    statuts: 'immo_nc_statuts_v2',
+    ratings_jev: 'immo_nc_ratings_v1',
+    notes_jev: 'immo_nc_notes_v1',
+    ratings_mc: 'immo_nc_ratings_mc_v1',
+    notes_mc: 'immo_nc_notes_mc_v1'
+  };
+  let migrated = 0;
+  Object.entries(lsMap).forEach(([fbPath, lsKey]) => {
+    try {
+      const local = JSON.parse(localStorage.getItem(lsKey) || '{}');
+      const existing = fbData[fbPath] || {};
+      Object.entries(local).forEach(([id, val]) => {
+        if (val && !existing[id]) {
+          db.ref(fbPath + '/' + id).set(val);
+          migrated++;
+        }
+      });
+    } catch(e) { console.warn('Migration error for', fbPath, e); }
+  });
+  localStorage.setItem('immo_nc_migrated_to_fb', 'true');
+  if (migrated > 0) {
+    console.log(`✅ Migration: ${migrated} entrées poussées vers Firebase`);
+    setTimeout(() => renderTable(), 500);
+  } else {
+    console.log('Migration: aucune donnée locale à migrer');
+  }
+}
+
+// Fallback: load from localStorage if Firebase not configured
+function loadFromLocalStorage() {
+  try { fbData.statuts = JSON.parse(localStorage.getItem('immo_nc_statuts_v2') || '{}'); } catch(e) {}
+  try { fbData.ratings_jev = JSON.parse(localStorage.getItem('immo_nc_ratings_v1') || '{}'); } catch(e) {}
+  try { fbData.notes_jev = JSON.parse(localStorage.getItem('immo_nc_notes_v1') || '{}'); } catch(e) {}
+  try { fbData.ratings_mc = JSON.parse(localStorage.getItem('immo_nc_ratings_mc_v1') || '{}'); } catch(e) {}
+  try { fbData.notes_mc = JSON.parse(localStorage.getItem('immo_nc_notes_mc_v1') || '{}'); } catch(e) {}
+}
+
+function fbSet(path, key, value) {
+  if (firebaseReady && db) {
+    if (value === null || value === undefined || value === '' || value === 0) {
+      db.ref(path + '/' + key).remove();
+    } else {
+      db.ref(path + '/' + key).set(value);
+    }
+  } else {
+    // Fallback localStorage
+    if (value === null || value === undefined || value === '' || value === 0) {
+      delete fbData[path][key];
+    } else {
+      fbData[path][key] = value;
+    }
+    const lsKeys = { statuts: 'immo_nc_statuts_v2', ratings_jev: 'immo_nc_ratings_v1', notes_jev: 'immo_nc_notes_v1', ratings_mc: 'immo_nc_ratings_mc_v1', notes_mc: 'immo_nc_notes_mc_v1' };
+    localStorage.setItem(lsKeys[path], JSON.stringify(fbData[path]));
+  }
+}
+
+function updateConnBadge(online) {
+  const badge = document.getElementById('conn-badge');
+  if (!badge) return;
+  if (online) {
+    badge.textContent = '🟢 En ligne';
+    badge.className = 'conn-badge conn-online';
+  } else {
+    badge.textContent = firebaseReady ? '🔴 Hors ligne' : '💾 Local';
+    badge.className = 'conn-badge conn-offline';
+  }
+}
+
+// ============================================
+//  USER SELECTION
+// ============================================
+let currentUser = localStorage.getItem('immo_nc_user') || null;
+
+function chooseUser() {
+  document.getElementById('user-modal').style.display = 'flex';
+}
+
+function selectUser(user) {
+  currentUser = user;
+  localStorage.setItem('immo_nc_user', user);
+  document.getElementById('user-modal').style.display = 'none';
+  updateUserBadge();
+}
+
+function updateUserBadge() {
+  const badge = document.getElementById('user-badge');
+  if (!badge) return;
+  if (currentUser === 'jev') {
+    badge.textContent = '👤 Jean-II';
+    badge.className = 'current-user-badge jev';
+  } else if (currentUser === 'mc') {
+    badge.textContent = '👤 Marie C.';
+    badge.className = 'current-user-badge mc';
+  } else {
+    badge.textContent = '👤 ?';
+    badge.className = 'current-user-badge';
+  }
+}
+
+// Show modal on first visit
+if (!currentUser) {
+  setTimeout(() => { document.getElementById('user-modal').style.display = 'flex'; }, 500);
+}
+updateUserBadge();
+
+// ============================================
+//  STATUT MANAGEMENT (Firebase-backed)
+// ============================================
+function getStatuts() { return fbData.statuts; }
+function getStatut(id) { return fbData.statuts[id] || 'actif'; }
+function setStatut(id, statut) {
+  fbSet('statuts', id, statut === 'actif' ? null : statut);
+  fbData.statuts[id] = statut === 'actif' ? undefined : statut;
+  if (statut === 'actif') delete fbData.statuts[id];
+}
+
+// ============================================
+//  NOTES & RATINGS (Firebase-backed)
+// ============================================
+function getUserNotes() { return fbData.notes_jev; }
+function setUserNote(id, note) {
+  fbSet('notes_jev', id, (note && note.trim()) || null);
+  if (note && note.trim()) fbData.notes_jev[id] = note.trim();
+  else delete fbData.notes_jev[id];
+}
+
+function getMCNotes() { return fbData.notes_mc; }
+function setMCNote(id, note) {
+  fbSet('notes_mc', id, (note && note.trim()) || null);
+  if (note && note.trim()) fbData.notes_mc[id] = note.trim();
+  else delete fbData.notes_mc[id];
+}
+
+function getUserRatings() { return fbData.ratings_jev; }
+function setUserRating(id, rating) {
+  fbSet('ratings_jev', id, rating || null);
+  if (rating) fbData.ratings_jev[id] = rating;
+  else delete fbData.ratings_jev[id];
+}
+
+function getMCRatings() { return fbData.ratings_mc; }
+function setMCRating(id, rating) {
+  fbSet('ratings_mc', id, rating || null);
+  if (rating) fbData.ratings_mc[id] = rating;
+  else delete fbData.ratings_mc[id];
+}
+
+function renderStars(id, current) {
+  let html = '';
+  for (let i = 1; i <= 5; i++) {
+    html += `<span style="cursor:pointer;font-size:1.2em;color:${i <= current ? '#f1c40f' : '#444'}" onclick="event.stopPropagation();setUserRating('${id}',${i === current ? 0 : i});renderTable();">${i <= current ? '★' : '☆'}</span>`;
+  }
+  return html;
+}
+
+function renderStarsMC(id, current) {
+  let html = '';
+  for (let i = 1; i <= 5; i++) {
+    html += `<span style="cursor:pointer;font-size:1.2em;color:${i <= current ? '#e67e22' : '#444'}" onclick="event.stopPropagation();setMCRating('${id}',${i === current ? 0 : i});renderTable();">${i <= current ? '★' : '☆'}</span>`;
+  }
+  return html;
+}
+
+// Initialize Firebase
+initFirebase();
+
+let showArchivees = false;
+
+function toggleArchivees() {
+  showArchivees = !showArchivees;
+  const btn = document.getElementById('toggle-arch');
+  btn.classList.toggle('active', showArchivees);
+  btn.textContent = showArchivees ? '📦 Masquer les archivées' : '📦 Voir les archivées';
+  updateDisplay();
+}
+
+function archiverAnnonce(id) {
+  if (confirm('Archiver cette annonce ? (Récupérable via "Tout restaurer")')) {
+    setStatut(id, 'archive');
+    map.closePopup();
+    updateDisplay();
+  }
+}
+
+function supprimerAnnonce(id) {
+  if (confirm('Supprimer cette annonce de la vue ? (Récupérable via "Tout restaurer")')) {
+    setStatut(id, 'supprime');
+    map.closePopup();
+    updateDisplay();
+  }
+}
+
+function restaurerAnnonce(id) {
+  setStatut(id, 'actif');
+  map.closePopup();
+  updateDisplay();
+}
+
+function toutRestaurer() {
+  const s = getStatuts();
+  const nb = Object.keys(s).length;
+  if (nb === 0) { alert('Aucune annonce archivée ou supprimée.'); return; }
+  if (confirm(`Restaurer ${nb} annonce(s) archivée(s)/supprimée(s) ?`)) {
+    Object.keys(s).forEach(id => fbSet('statuts', id, null));
+    fbData.statuts = {};
+    updateDisplay();
+  }
+}
+
+// ============================================
+//  HELPERS
+// ============================================
+function formatXPF(val) {
+  if (!val) return '—';
+  if (val >= 1000000) return (val / 1000000).toFixed(2).replace(/\.?0+$/, '') + ' MF';
+  if (val >= 1000) return (val / 1000).toFixed(0) + ' kF';
+  return val.toLocaleString('fr-FR') + ' F';
+}
+
+function prixM2(a) {
+  return a.surface_m2 > 0 ? Math.round(a.prix_vente / a.surface_m2) : 0;
+}
+
+function rendementBrut(a) {
+  if (a.prix_vente <= 0 || a.loyer_mensuel_estime <= 0) return 0;
+  return (a.loyer_mensuel_estime * 12) / a.prix_vente * 100;
+}
+
+function rendementNet(a) {
+  if (a.prix_vente <= 0 || a.loyer_mensuel_estime <= 0) return 0;
+  const rev = a.loyer_mensuel_estime * 12;
+  const charges = a.charges_mensuelles * 12 + a.taxe_fonciere_annuelle;
+  return (rev - charges) / (a.prix_vente + a.travaux_estimes) * 100;
+}
+
+function etageLabel(etage) {
+  if (etage === null || etage === undefined) return '—';
+  if (etage === -1) return 'Duplex';
+  if (etage === 0) return 'RDC';
+  return etage + 'e étage';
+}
+
+function etatLabel(etat) {
+  const map = { neuf:'Neuf', bon:'Bon état', renove:'Rénové', travaux_legers:'Travaux légers', travaux_importants:'Travaux importants' };
+  return map[etat] || etat;
+}
+
+function etatBadgeClass(etat) {
+  if (['neuf','renove'].includes(etat)) return 'good';
+  if (['bon','travaux_legers'].includes(etat)) return 'medium';
+  return 'bad';
+}
+
+function sourceLabel(src) {
+  if (src === 'immonc.com') return '🔵 immonc.com';
+  if (src === 'immobilier.nc') return '🟢 immobilier.nc';
+  if (src === 'bienmeloger.nc') return '🟡 bienmeloger.nc';
+  if (src === 'facebook') return '🔷 Facebook Marketplace';
+  if (src === 'nestenn') return '🟠 Nestenn';
+  if (src === 'jean-ii') return '👤 Jean-II (saisie manuelle)';
+  if (src === 'exemple') return '⚪ Donnée exemple';
+  return src || 'Non renseigné';
+}
+
+function origineLabel(annonce) {
+  const date = annonce.date_ajout ? ' — ' + annonce.date_ajout : '';
+  // Annonce fournie directement par Jean-II (pas de site source)
+  if (annonce.origine === 'manuel' || annonce.source === 'jean-ii') {
+    return '👤 Fournie par Jean-II' + date;
+  }
+  // Annonce issue de la veille automatique (scrapée depuis un site)
+  if (annonce.origine === 'veille' || annonce.origine === 'scraping') {
+    return '🤖 Collectée par veille auto sur ' + sourceLabel(annonce.source) + date;
+  }
+  // Donnée exemple
+  if (annonce.source === 'exemple') {
+    return '⚪ Donnée exemple (test)';
+  }
+  // Fallback
+  return '🔍 ' + sourceLabel(annonce.source) + date;
+}
+
+function sourceUrlBlock(annonce) {
+  // Si l'annonce a un lien, on l'affiche directement
+  if (annonce.url_annonce) {
+    return `<a href="${annonce.url_annonce}" target="_blank" style="display:inline-block;margin-top:4px;font-size:0.8em;color:#3498db;text-decoration:none;">🔗 Voir l'annonce originale ↗</a>`;
+  }
+  // Si c'est une annonce issue d'un site mais sans URL → problème à signaler
+  const sitesScrapes = ['immonc.com','immobilier.nc','bienmeloger.nc','facebook','nestenn','superimmo'];
+  if (sitesScrapes.includes(annonce.source)) {
+    return `<div style="font-size:0.75em;color:#e67e22;margin-top:3px;">⚠️ URL non capturée lors de la veille — à retrouver sur ${annonce.source}</div>`;
+  }
+  // Annonce manuelle de Jean-II → normal qu'il n'y ait pas de lien
+  if (annonce.source === 'jean-ii' || annonce.origine === 'manuel') {
+    return `<div style="font-size:0.75em;color:#a0a0b0;margin-top:3px;font-style:italic;">Source : information directe Jean-II</div>`;
+  }
+  return '';
+}
+
+function sourceBadgeClass(src) {
+  if (src === 'immonc.com') return 'src-immonc';
+  if (src === 'immobilier.nc') return 'src-immo';
+  if (src === 'facebook') return 'src-fb';
+  return '';
+}
+
+// ============================================
+//  COLOR SCALES
+// ============================================
+function lerpColor(a, b, t) {
+  const ah = parseInt(a.replace('#',''), 16), bh = parseInt(b.replace('#',''), 16);
+  const ar = ah>>16, ag=(ah>>8)&0xff, ab=ah&0xff;
+  const br = bh>>16, bg=(bh>>8)&0xff, bb=bh&0xff;
+  const rr = Math.round(ar+(br-ar)*t), rg=Math.round(ag+(bg-ag)*t), rb=Math.round(ab+(bb-ab)*t);
+  return '#'+((rr<<16)|(rg<<8)|rb).toString(16).padStart(6,'0');
+}
+
+function getColorForValue(val, min, max, colors) {
+  if (max === min) return colors[Math.floor(colors.length/2)];
+  const t = Math.max(0, Math.min(1, (val-min)/(max-min)));
+  const seg = t*(colors.length-1);
+  const i = Math.floor(seg);
+  if (i >= colors.length-1) return colors[colors.length-1];
+  return lerpColor(colors[i], colors[i+1], seg-i);
+}
+
+const SCALE_PRIX_M2 = ['#2ecc71','#f1c40f','#e67e22','#e74c3c'];
+const SCALE_RENDEMENT = ['#e74c3c','#f1c40f','#2ecc71'];
+const ETAT_COLORS = { neuf:'#2ecc71', bon:'#3498db', renove:'#1abc9c', travaux_legers:'#f39c12', travaux_importants:'#e74c3c' };
+const TYPE_COLORS = { appartement:'#3498db', maison:'#2ecc71' };
+const SOURCE_COLORS = { 'immonc.com':'#006064', 'immobilier.nc':'#1b5e20', 'facebook':'#1877f2' };
+
+// ============================================
+//  MAP INIT
+// ============================================
+const map = L.map('map', { zoomControl: true }).setView([-22.2735, 166.4580], 13);
+L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>',
+  subdomains: 'abcd', maxZoom: 20
+}).addTo(map);
+
+let markers = [];
+let currentColorMode = 'quartier';
+
+// ============================================
+//  FILTER LOGIC
+// ============================================
+function getFilteredAnnonces() {
+  const statuts = getStatuts();
+  const quartier = document.getElementById('filter-quartier').value;
+  const type = document.getElementById('filter-type').value;
+  const source = document.getElementById('filter-source').value;
+  const prixMin = (parseFloat(document.getElementById('filter-prix-min').value) || 0) * 1000000;
+  const prixMax = (parseFloat(document.getElementById('filter-prix-max').value) || Infinity) * 1000000;
+  const surfMin = parseFloat(document.getElementById('filter-surface-min').value) || 0;
+  const rdtMin = parseFloat(document.getElementById('filter-rendement-min').value) || 0;
+  const dateDepuis = document.getElementById('filter-date-depuis').value || '';
+  const dateJusqua = document.getElementById('filter-date-jusqua').value || '';
+
+  return DATA.annonces.filter(a => {
+    const statut = statuts[a.id] || 'actif';
+    if (statut === 'supprime') return false;
+    if (statut === 'archive' && !showArchivees) return false;
+    if (quartier !== 'tous' && a.quartier !== quartier) return false;
+    if (type !== 'tous' && a.type_bien !== type) return false;
+    if (source !== 'tous' && a.source !== source) return false;
+    if (a.prix_vente < prixMin || a.prix_vente > prixMax) return false;
+    if (a.surface_m2 < surfMin) return false;
+    if (rendementBrut(a) < rdtMin) return false;
+    if (dateDepuis && a.date_ajout && a.date_ajout < dateDepuis) return false;
+    if (dateJusqua && a.date_ajout && a.date_ajout > dateJusqua) return false;
+    return true;
+  });
+}
+
+function setDateFilter(days) {
+  const d = new Date();
+  d.setDate(d.getDate() - days);
+  const iso = d.toISOString().slice(0, 10);
+  document.getElementById('filter-date-depuis').value = iso;
+  document.getElementById('filter-date-jusqua').value = '';
+  updateDisplay();
+}
+
+function clearDateFilter() {
+  document.getElementById('filter-date-depuis').value = '';
+  document.getElementById('filter-date-jusqua').value = '';
+  updateDisplay();
+}
+
+// ============================================
+//  MARKER COLOR
+// ============================================
+function getMarkerColor(annonce, allFiltered) {
+  switch (currentColorMode) {
+    case 'quartier': return DATA.quartiers[annonce.quartier]?.couleur || '#888';
+    case 'prix_m2': {
+      const vals = allFiltered.filter(a => a.surface_m2 > 0).map(a => prixM2(a));
+      if (!vals.length) return '#888';
+      return getColorForValue(prixM2(annonce), Math.min(...vals), Math.max(...vals), SCALE_PRIX_M2);
+    }
+    case 'rendement': {
+      const vals = allFiltered.map(a => rendementBrut(a));
+      return getColorForValue(rendementBrut(annonce), Math.min(...vals), Math.max(...vals), SCALE_RENDEMENT);
+    }
+    case 'etat': return ETAT_COLORS[annonce.etat] || '#888';
+    case 'type': return TYPE_COLORS[annonce.type_bien] || '#888';
+    case 'source': return SOURCE_COLORS[annonce.source] || '#888';
+    default: return '#e94560';
+  }
+}
+
+// ============================================
+//  CREATE MARKER + POPUP
+// ============================================
+function createMarker(annonce, color) {
+  const statut = getStatut(annonce.id);
+  const isArchived = statut === 'archive';
+  const size = Math.max(14, Math.min(32, (annonce.surface_m2 || 50) / 5 + 10));
+  const opacity = isArchived ? 0.45 : 1;
+
+  const prixMF = (annonce.prix_vente / 1000000).toFixed(annonce.prix_vente >= 10000000 ? 0 : 1);
+  const markerSize = Math.max(28, Math.min(44, prixMF * 0.6 + 22));
+  const icon = L.divIcon({
+    className: '',
+    html: `<div style="
+      width:${markerSize}px; height:${markerSize}px;
+      background:${color};
+      border:2px solid ${isArchived ? '#f39c12' : 'white'};
+      border-radius:50%;
+      box-shadow:0 2px 6px rgba(0,0,0,0.4);
+      display:flex; align-items:center; justify-content:center;
+      font-size:${Math.max(9, markerSize*0.3)}px; font-weight:700; color:white;
+      opacity:${opacity};
+      line-height:1.1; text-align:center;
+    ">${prixMF}</div>`,
+    iconSize: [markerSize, markerSize],
+    iconAnchor: [markerSize/2, markerSize/2]
+  });
+
+  const rdt = rendementBrut(annonce);
+  const rdtNet = rendementNet(annonce);
+  const rdtColor = rdt >= 7 ? '#2ecc71' : rdt >= 5 ? '#f1c40f' : '#e74c3c';
+  const pm2 = prixM2(annonce);
+  const qInfo = DATA.quartiers[annonce.quartier] || { nom: annonce.quartier, couleur: '#888' };
+
+  const archiveActions = isArchived
+    ? `<button class="btn-action btn-restore" onclick="restaurerAnnonce(${annonce.id})">↩️ Restaurer</button>`
+    : `<button class="btn-action btn-archive" onclick="archiverAnnonce(${annonce.id})">📦 Archiver</button>
+       <button class="btn-action btn-delete" onclick="supprimerAnnonce(${annonce.id})">🗑️ Supprimer</button>`;
+
+  const photos = (annonce.photos && annonce.photos.length > 0) ? annonce.photos.filter(p => p && p.startsWith('http')) : [];
+  const photosHtml = photos.length > 0
+    ? `<div class="popup-photos" id="gallery-${annonce.id}">
+        <img class="gallery-main" src="${photos[0]}" alt="Photo" onerror="this.style.display='none'" onclick="openLightbox(${annonce.id}, 0)">
+        ${photos.length > 1 ? `
+          <button class="gallery-nav gallery-prev" onclick="galleryNav(${annonce.id}, -1)">‹</button>
+          <button class="gallery-nav gallery-next" onclick="galleryNav(${annonce.id}, 1)">›</button>
+          <div class="popup-photo-count"><span id="gallery-idx-${annonce.id}">1</span>/${photos.length} 📷</div>
+          <div class="popup-thumbs">${photos.slice(0, 5).map((p, i) =>
+            `<img src="${p}" class="${i === 0 ? 'active' : ''}" onclick="galleryGo(${annonce.id}, ${i})" onerror="this.style.display='none'">`
+          ).join('')}</div>
+        ` : ''}
+       </div>`
+    : '<div style="text-align:center;padding:15px 0;color:#555;font-size:0.8em;">📷 Pas de photo disponible</div>';
+
+  const popup = `
+    <div style="min-width:240px;max-width:300px">
+      ${photosHtml}
+      ${isArchived ? '<div class="popup-archived-notice">📦 Annonce archivée</div>' : ''}
+      <div class="popup-title">${annonce.titre}</div>
+
+      <div class="popup-row"><span class="label">Prix</span><span class="value" style="color:#e94560">${formatXPF(annonce.prix_vente)}</span></div>
+      <div class="popup-row"><span class="label">Surface</span><span class="value">${annonce.surface_m2 > 0 ? annonce.surface_m2 + ' m²' : '—'}</span></div>
+      ${pm2 > 0 ? `<div class="popup-row"><span class="label">Prix/m²</span><span class="value">${formatXPF(pm2)}/m²</span></div>` : ''}
+      <div class="popup-row"><span class="label">Pièces</span><span class="value">${annonce.nb_pieces}p / ${annonce.nb_chambres}ch</span></div>
+      <div class="popup-row"><span class="label">Étage</span><span class="value">${etageLabel(annonce.etage)}</span></div>
+      <div class="popup-row"><span class="label">État</span><span class="value">${etatLabel(annonce.etat)}</span></div>
+      <div class="popup-row"><span class="label">Quartier</span><span class="value"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${qInfo.couleur};margin-right:4px;vertical-align:middle"></span>${qInfo.nom}</span></div>
+      ${annonce.parking !== null ? `<div class="popup-row"><span class="label">Parking</span><span class="value">${annonce.parking ? '✅' : '❌'}</span></div>` : ''}
+      ${annonce.meuble ? `<div class="popup-row"><span class="label">Meublé</span><span class="value">✅</span></div>` : ''}
+      ${annonce.travaux_estimes > 0 ? `<div class="popup-row"><span class="label">Travaux estimés</span><span class="value" style="color:#e67e22">${formatXPF(annonce.travaux_estimes)}</span></div>` : ''}
+      <div class="popup-row"><span class="label">Loyer estimé</span><span class="value">${formatXPF(annonce.loyer_mensuel_estime)}/mois</span></div>
+      <div class="popup-source-block" style="margin:8px 0;padding:8px;background:rgba(15,52,96,0.5);border-radius:6px;border-left:3px solid #e94560;">
+        <div style="font-size:0.75em;color:#e94560;font-weight:600;margin-bottom:3px;">📌 TRAÇABILITÉ</div>
+        <div style="font-size:0.8em;color:#ccc;">${origineLabel(annonce)}</div>
+        ${annonce.ref ? `<div style="font-size:0.78em;color:#a0a0b0;margin-top:2px;">Réf: ${annonce.ref}</div>` : ''}
+        ${sourceUrlBlock(annonce)}
+      </div>
+
+      <div class="popup-rendement">
+        <div style="font-size:0.8em;color:#a0a0b0">Rendement brut</div>
+        <div class="val" style="color:${rdtColor}">${rdt.toFixed(1)}%</div>
+        <div style="font-size:0.75em;color:#a0a0b0">Net estimé: ${rdtNet.toFixed(1)}%</div>
+      </div>
+
+      ${annonce.notes ? `<div class="popup-notes">${annonce.notes}</div>` : ''}
+      ${annonce.donnees_estimees ? '<div class="popup-estimated">⚠️ Surface/loyer estimés par type de bien — vérifier l\'annonce originale</div>' : ''}
+
+      <div class="popup-actions">
+        ${archiveActions}
+        ${annonce.url_annonce ? `<a class="btn-link" href="${annonce.url_annonce}" target="_blank">🔗 Voir</a>` : ''}
+      </div>
+    </div>`;
+
+  const marker = L.marker([annonce.lat, annonce.lng], { icon }).bindPopup(popup, { maxWidth: 310 });
+  marker._annonceId = annonce.id;
+  return marker;
+}
+
+// ============================================
+//  UPDATE DISPLAY
+// ============================================
+function updateDisplay() {
+  const filtered = getFilteredAnnonces();
+  markers.forEach(m => map.removeLayer(m));
+  markers = [];
+
+  filtered.forEach(a => {
+    const color = getMarkerColor(a, filtered);
+    const m = createMarker(a, color);
+    m.addTo(map);
+    markers.push(m);
+  });
+
+  updateStats(filtered);
+  updateQuartierTable(filtered);
+  updateAnnonceList(filtered);
+  updateLegend(filtered);
+  updateHeaderStats();
+}
+
+function updateHeaderStats() {
+  const statuts = getStatuts();
+  let actifs = 0, archives = 0, supprimes = 0;
+  DATA.annonces.forEach(a => {
+    const s = statuts[a.id] || 'actif';
+    if (s === 'archive') archives++;
+    else if (s === 'supprime') supprimes++;
+    else actifs++;
+  });
+  const div = document.getElementById('header-stats');
+  div.innerHTML = `
+    <span class="header-badge hb-actif">${actifs} actives</span>
+    ${archives > 0 ? `<span class="header-badge hb-archive">${archives} archivées</span>` : ''}
+    ${supprimes > 0 ? `<span class="header-badge hb-supprime" title="Cliquez sur Tout restaurer pour récupérer">${supprimes} supprimées</span>` : ''}`;
+}
+
+function updateStats(filtered) {
+  const n = filtered.length;
+  document.getElementById('stat-nb').textContent = n;
+  if (n === 0) {
+    ['stat-prix-moyen','stat-prix-m2','stat-rendement','stat-surface-moy'].forEach(id =>
+      document.getElementById(id).textContent = '—');
+    return;
+  }
+  const avgPrix = filtered.reduce((s,a) => s+a.prix_vente, 0) / n;
+  const withSurf = filtered.filter(a => a.surface_m2 > 0);
+  const avgPrixM2 = withSurf.length ? withSurf.reduce((s,a) => s+prixM2(a), 0) / withSurf.length : 0;
+  const avgRdt = filtered.reduce((s,a) => s+rendementBrut(a), 0) / n;
+  const avgSurf = withSurf.length ? withSurf.reduce((s,a) => s+a.surface_m2, 0) / withSurf.length : 0;
+
+  document.getElementById('stat-prix-moyen').textContent = (avgPrix/1000000).toFixed(1);
+  document.getElementById('stat-prix-m2').textContent = avgPrixM2 > 0 ? (avgPrixM2/1000).toFixed(0) : '—';
+  document.getElementById('stat-rendement').textContent = avgRdt.toFixed(1) + '%';
+  document.getElementById('stat-surface-moy').textContent = avgSurf > 0 ? Math.round(avgSurf) : '—';
+}
+
+function updateQuartierTable(filtered) {
+  const byQ = {};
+  filtered.forEach(a => { if (!byQ[a.quartier]) byQ[a.quartier] = []; byQ[a.quartier].push(a); });
+  document.getElementById('quartier-tbody').innerHTML = Object.entries(byQ)
+    .sort((a,b) => b[1].length - a[1].length)
+    .map(([q, ann]) => {
+      const qi = DATA.quartiers[q] || { nom:q, couleur:'#888' };
+      const withSurf = ann.filter(a => a.surface_m2 > 0);
+      const avgPM2 = withSurf.length ? withSurf.reduce((s,a) => s+prixM2(a),0)/withSurf.length : 0;
+      const avgRdt = ann.reduce((s,a) => s+rendementBrut(a),0)/ann.length;
+      return `<tr>
+        <td><span class="quartier-color" style="background:${qi.couleur}"></span>${qi.nom}</td>
+        <td>${ann.length}</td>
+        <td>${avgPM2>0 ? (avgPM2/1000).toFixed(0)+' k' : '—'}</td>
+        <td style="color:${avgRdt>=6?'#2ecc71':avgRdt>=4?'#f1c40f':'#e74c3c'}">${avgRdt.toFixed(1)}%</td>
+      </tr>`;
+    }).join('');
+}
+
+function updateAnnonceList(filtered) {
+  const statuts = getStatuts();
+  document.getElementById('annonce-count').textContent = filtered.length;
+  const sorted = [...filtered].sort((a,b) => rendementBrut(b) - rendementBrut(a));
+
+  document.getElementById('annonce-list').innerHTML = sorted.map(a => {
+    const rdt = rendementBrut(a);
+    const qi = DATA.quartiers[a.quartier] || { nom:a.quartier, couleur:'#888' };
+    const statut = statuts[a.id] || 'actif';
+    const isArchived = statut === 'archive';
+    const pm2 = prixM2(a);
+
+    const actionBtns = isArchived
+      ? `<button class="card-btn card-btn-restore" onclick="event.stopPropagation();restaurerAnnonce(${a.id})">↩️ Restaurer</button>`
+      : `<button class="card-btn card-btn-archive" onclick="event.stopPropagation();archiverAnnonce(${a.id})">📦</button>
+         <button class="card-btn card-btn-delete" onclick="event.stopPropagation();supprimerAnnonce(${a.id})">🗑️</button>`;
+
+    return `<div class="annonce-card${isArchived?' archived':''}" onclick="flyToAnnonce(${a.id})" style="border-left-color:${qi.couleur}">
+      <div class="title">${a.titre}</div>
+      <div class="price">${formatXPF(a.prix_vente)}${pm2>0?' <span style="font-size:0.68em;color:#a0a0b0">('+formatXPF(pm2)+'/m²)</span>':''}</div>
+      <div class="meta">${a.surface_m2>0?a.surface_m2+'m² · ':''}${a.nb_pieces}p · ${qi.nom}</div>
+      <div class="badges">
+        <span class="badge ${etatBadgeClass(a.etat)}">${etatLabel(a.etat)}</span>
+        <span class="badge ${rdt>=7?'good':rdt>=5?'medium':'bad'}">Rdt ${rdt.toFixed(1)}%</span>
+        <span class="badge ${sourceBadgeClass(a.source)}">${sourceLabel(a.source)}</span>
+        ${a.parking===true?'<span class="badge">🅿️</span>':''}
+        ${a.meuble?'<span class="badge">Meublé</span>':''}
+        ${isArchived?'<span class="badge archived-badge">Archivée</span>':''}
+        ${a.donnees_estimees?'<span class="badge estimated">estimé</span>':''}
+      </div>
+      <div class="card-actions">${actionBtns}</div>
+    </div>`;
+  }).join('');
+}
+
+function updateLegend(filtered) {
+  const legend = document.getElementById('legend');
+  if (currentColorMode === 'quartier') {
+    const qPres = [...new Set(filtered.map(a => a.quartier))];
+    legend.innerHTML = '<div class="legend-title">Quartiers</div>' +
+      qPres.map(q => {
+        const qi = DATA.quartiers[q] || { nom:q, couleur:'#888' };
+        return `<div class="legend-item"><div class="legend-color" style="background:${qi.couleur}"></div>${qi.nom}</div>`;
+      }).join('');
+  } else if (currentColorMode === 'prix_m2') {
+    const vals = filtered.filter(a=>a.surface_m2>0).map(a=>prixM2(a));
+    if (!vals.length) { legend.innerHTML=''; return; }
+    legend.innerHTML = `<div class="legend-title">Prix/m²</div>
+      <div class="legend-gradient" style="background:linear-gradient(to right,${SCALE_PRIX_M2.join(',')})"></div>
+      <div class="legend-labels"><span>${formatXPF(Math.min(...vals))}</span><span>${formatXPF(Math.max(...vals))}</span></div>`;
+  } else if (currentColorMode === 'rendement') {
+    const vals = filtered.map(a=>rendementBrut(a));
+    legend.innerHTML = `<div class="legend-title">Rendement brut</div>
+      <div class="legend-gradient" style="background:linear-gradient(to right,${SCALE_RENDEMENT.join(',')})"></div>
+      <div class="legend-labels"><span>${Math.min(...vals).toFixed(1)}%</span><span>${Math.max(...vals).toFixed(1)}%</span></div>`;
+  } else if (currentColorMode === 'etat') {
+    legend.innerHTML = '<div class="legend-title">État du bien</div>' +
+      Object.entries(ETAT_COLORS).map(([k,c]) =>
+        `<div class="legend-item"><div class="legend-color" style="background:${c}"></div>${etatLabel(k)}</div>`).join('');
+  } else if (currentColorMode === 'type') {
+    legend.innerHTML = '<div class="legend-title">Type de bien</div>' +
+      Object.entries(TYPE_COLORS).map(([k,c]) =>
+        `<div class="legend-item"><div class="legend-color" style="background:${c}"></div>${k.charAt(0).toUpperCase()+k.slice(1)}</div>`).join('');
+  } else if (currentColorMode === 'source') {
+    legend.innerHTML = '<div class="legend-title">Source</div>' +
+      Object.entries(SOURCE_COLORS).map(([k,c]) =>
+        `<div class="legend-item"><div class="legend-color" style="background:${c}"></div>${k}</div>`).join('');
+  }
+}
+
+// ============================================
+//  INTERACTIONS
+// ============================================
+function flyToAnnonce(id) {
+  const m = markers.find(m => m._annonceId === id);
+  if (m) {
+    map.flyTo(m.getLatLng(), 16, { duration: 0.7 });
+    setTimeout(() => m.openPopup(), 750);
+  }
+}
+
+document.querySelectorAll('.color-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.color-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    currentColorMode = btn.dataset.mode;
+    updateDisplay();
+  });
+});
+
+['filter-quartier','filter-type','filter-source','filter-date-depuis','filter-date-jusqua'].forEach(id =>
+  document.getElementById(id).addEventListener('change', updateDisplay));
+
+function debounce(fn, ms) {
+  let t; return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
+}
+['filter-prix-min','filter-prix-max','filter-surface-min','filter-rendement-min'].forEach(id =>
+  document.getElementById(id).addEventListener('input', debounce(updateDisplay, 300)));
+
+// ============================================
+//  INIT
+// ============================================
+function init() {
+  const sel = document.getElementById('filter-quartier');
+  Object.entries(DATA.quartiers)
+    .sort((a,b) => a[1].nom.localeCompare(b[1].nom))
+    .forEach(([k,v]) => {
+      const opt = document.createElement('option');
+      opt.value = k; opt.textContent = v.nom;
+      sel.appendChild(opt);
+    });
+  document.getElementById('last-update').textContent = `Mise à jour : ${DATA.metadata.derniere_maj}`;
+  updateDisplay();
+}
+
+init();
+
+// ============================================
+//  TAB SYSTEM
+// ============================================
+function switchTab(name) {
+  document.querySelectorAll('.tab-content').forEach(el => { el.classList.remove('active'); el.style.display = 'none'; });
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  const tab = document.getElementById('tab-' + name);
+  if (tab) { tab.classList.add('active'); tab.style.display = 'flex'; }
+  document.querySelectorAll('.tab-btn').forEach(b => { if (b.textContent.toLowerCase().includes(name === 'carte' ? 'carte' : 'tableau')) b.classList.add('active'); });
+  if (name === 'carte') setTimeout(() => map.invalidateSize(), 100);
+  if (name === 'tableau') renderTable();
+}
+
+// ============================================
+//  DYNAMIC TABLE
+// ============================================
+const TABLE_COLS = [
+  { key: 'photo', label: '📷', visible: true, sortable: false },
+  { key: 'titre', label: 'Titre', visible: true, sortable: true },
+  { key: 'quartier', label: 'Quartier', visible: true, sortable: true },
+  { key: 'type_bien', label: 'Type', visible: true, sortable: true },
+  { key: 'prix_vente', label: 'Prix', visible: true, sortable: true, format: 'xpf' },
+  { key: 'surface_m2', label: 'Surface', visible: true, sortable: true, suffix: ' m²' },
+  { key: 'prix_m2', label: 'Prix/m²', visible: true, sortable: true, format: 'xpf_m2' },
+  { key: 'nb_pieces', label: 'Pièces', visible: true, sortable: true },
+  { key: 'nb_chambres', label: 'Chambres', visible: true, sortable: true },
+  { key: 'etage', label: 'Étage', visible: false, sortable: true },
+  { key: 'etat', label: 'État', visible: true, sortable: true },
+  { key: 'rendement', label: 'Rdt brut', visible: true, sortable: true, format: 'pct' },
+  { key: 'rendement_net', label: 'Rdt net', visible: false, sortable: true, format: 'pct' },
+  { key: 'loyer_mensuel_estime', label: 'Loyer est.', visible: true, sortable: true, format: 'xpf' },
+  { key: 'travaux_estimes', label: 'Travaux', visible: false, sortable: true, format: 'xpf' },
+  { key: 'parking', label: 'Parking', visible: false, sortable: true },
+  { key: 'source', label: 'Source', visible: true, sortable: true },
+  { key: 'origine', label: 'Origine', visible: false, sortable: true },
+  { key: 'date_ajout', label: 'Date ajout', visible: true, sortable: true },
+  { key: 'lien', label: 'Lien', visible: true, sortable: false },
+  { key: 'notes', label: '📋 Note annonce', visible: true, sortable: true },
+  { key: 'rating', label: '⭐ Note JEV', visible: true, sortable: true },
+  { key: 'user_comment', label: '💬 Avis JEV', visible: true, sortable: true },
+  { key: 'rating_mc', label: '⭐ Note MC', visible: true, sortable: true },
+  { key: 'comment_mc', label: '💬 Avis MC', visible: true, sortable: true }
+];
+
+let tableSortCol = 'prix_vente';
+let tableSortDir = 1; // 1=asc, -1=desc
+
+function getRowData(a) {
+  return {
+    photo: a.photos && a.photos.length > 0 ? a.photos[0] : '',
+    titre: a.titre,
+    quartier: (DATA.quartiers[a.quartier] || {}).nom || a.quartier,
+    quartier_key: a.quartier,
+    type_bien: a.type_bien,
+    prix_vente: a.prix_vente,
+    surface_m2: a.surface_m2 || 0,
+    prix_m2: a.surface_m2 > 0 ? Math.round(a.prix_vente / a.surface_m2) : 0,
+    nb_pieces: a.nb_pieces,
+    nb_chambres: a.nb_chambres,
+    etage: a.etage,
+    etat: etatLabel(a.etat),
+    etat_key: a.etat,
+    rendement: rendementBrut(a),
+    rendement_net: rendementNet(a),
+    loyer_mensuel_estime: a.loyer_mensuel_estime,
+    travaux_estimes: a.travaux_estimes || 0,
+    parking: a.parking ? 'Oui' : a.parking === false ? 'Non' : '—',
+    source: a.source,
+    origine: a.origine === 'veille' ? '🤖 Veille' : a.origine === 'manuel' ? '👤 Manuel' : a.origine || '—',
+    date_ajout: a.date_ajout || '—',
+    lien: a.url_annonce || '',
+    notes: a.notes || '',
+    rating: getUserRatings()[a.id] || 0,
+    user_comment: getUserNotes()[a.id] || '',
+    rating_mc: getMCRatings()[a.id] || 0,
+    comment_mc: getMCNotes()[a.id] || '',
+    _id: a.id,
+    _raw: a
+  };
+}
+
+function formatCell(val, col, rowId) {
+  if (col.key === 'photo') return val ? `<img class="thumb" src="${val}" onerror="this.style.display='none'" onclick="openLightbox('${rowId}',0)">` : '';
+  if (col.key === 'lien') return val ? `<a href="${val}" target="_blank">🔗 Voir</a>` : '—';
+  if (col.key === 'rating') return renderStars(rowId, val);
+  if (col.key === 'user_comment') {
+    const escaped = (val || '').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    return `<input type="text" value="${escaped}" placeholder="Mon avis..."
+      style="width:140px;padding:3px 6px;background:#1a1a2e;border:1px solid #0f3460;border-radius:4px;color:#eee;font-size:0.85em;"
+      onchange="setUserNote('${rowId}',this.value)" onclick="event.stopPropagation()">`;
+  }
+  if (col.key === 'rating_mc') return renderStarsMC(rowId, val);
+  if (col.key === 'comment_mc') {
+    const escaped = (val || '').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    return `<input type="text" value="${escaped}" placeholder="Note MC..."
+      style="width:140px;padding:3px 6px;background:#1a1a2e;border:1px solid #e67e22;border-radius:4px;color:#f0c97a;font-size:0.85em;"
+      onchange="setMCNote('${rowId}',this.value)" onclick="event.stopPropagation()">`;
+  }
+  if (col.format === 'xpf') return formatXPF(val);
+  if (col.format === 'xpf_m2') return val > 0 ? formatXPF(val) + '/m²' : '—';
+  if (col.format === 'pct') {
+    const cls = val >= 7 ? 'rdt-good' : val >= 5 ? 'rdt-medium' : 'rdt-bad';
+    return `<span class="${cls}">${val.toFixed(1)}%</span>`;
+  }
+  if (col.suffix) return val + col.suffix;
+  return val ?? '—';
+}
+
+function renderTable() {
+  const search = document.getElementById('table-search').value.toLowerCase();
+  const groupBy = document.getElementById('group-by').value;
+  const visibleCols = TABLE_COLS.filter(c => c.visible);
+
+  // Build header with drag & drop
+  document.getElementById('table-head').innerHTML =
+    `<th style="width:36px;text-align:center;"><input type="checkbox" class="row-check" id="select-all-cb" onclick="toggleSelectAll()"></th>` +
+    visibleCols.map((c, idx) =>
+    `<th draggable="true" data-col-key="${c.key}" data-col-idx="${idx}"
+        onclick="${c.sortable ? `sortTable('${c.key}')` : ''}" title="${c.label} — glisser pour déplacer">
+      ${c.label}${c.sortable ? `<span class="sort-icon">${tableSortCol === c.key ? (tableSortDir === 1 ? '▲' : '▼') : '⇅'}</span>` : ''}
+    </th>`
+  ).join('');
+  initColumnDragDrop();
+
+  // Get & filter data
+  let rows = DATA.annonces.map(a => getRowData(a));
+  if (search) {
+    rows = rows.filter(r =>
+      r.titre.toLowerCase().includes(search) ||
+      r.quartier.toLowerCase().includes(search) ||
+      r.notes.toLowerCase().includes(search) ||
+      r.type_bien.toLowerCase().includes(search) ||
+      r.source.toLowerCase().includes(search) ||
+      r.etat.toLowerCase().includes(search) ||
+      r.user_comment.toLowerCase().includes(search) ||
+      r.comment_mc.toLowerCase().includes(search) ||
+      (search === 'favoris' && r.rating >= 4) ||
+      (search === 'notees' && r.rating > 0) ||
+      (search.match(/^\d+ etoile/) && r.rating >= parseInt(search))
+    );
+  }
+
+  // Sort
+  rows.sort((a, b) => {
+    let va = a[tableSortCol], vb = b[tableSortCol];
+    if (typeof va === 'string') return va.localeCompare(vb) * tableSortDir;
+    return ((va || 0) - (vb || 0)) * tableSortDir;
+  });
+
+  // Group & render
+  const tbody = document.getElementById('table-body');
+  let html = '';
+
+  if (groupBy !== 'none') {
+    const groups = {};
+    rows.forEach(r => {
+      const key = r[groupBy] || 'Autre';
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(r);
+    });
+    Object.entries(groups).sort((a,b) => b[1].length - a[1].length).forEach(([gName, gRows]) => {
+      const avgPrix = gRows.reduce((s,r) => s + r.prix_vente, 0) / gRows.length;
+      const avgRdt = gRows.reduce((s,r) => s + r.rendement, 0) / gRows.length;
+      html += `<tr class="group-header"><td colspan="${visibleCols.length + 1}">${gName} — ${gRows.length} annonce(s) — Prix moy: ${formatXPF(avgPrix)} — Rdt moy: ${avgRdt.toFixed(1)}%</td></tr>`;
+      gRows.forEach(r => { html += renderRow(r, visibleCols); });
+    });
+  } else {
+    if (rows.length === 0) {
+      html = `<tr class="no-results"><td colspan="${visibleCols.length + 1}">Aucune annonce ne correspond à votre recherche</td></tr>`;
+    } else {
+      rows.forEach(r => { html += renderRow(r, visibleCols); });
+    }
+  }
+  tbody.innerHTML = html;
+
+  // Footer stats
+  const total = rows.length;
+  const avgPrix = total > 0 ? rows.reduce((s,r) => s + r.prix_vente, 0) / total : 0;
+  const avgPM2 = total > 0 ? rows.filter(r=>r.prix_m2>0).reduce((s,r) => s + r.prix_m2, 0) / (rows.filter(r=>r.prix_m2>0).length||1) : 0;
+  const avgRdt = total > 0 ? rows.reduce((s,r) => s + r.rendement, 0) / total : 0;
+  document.getElementById('table-footer').innerHTML = `
+    <div class="stat">Annonces: <span class="stat-val">${total}</span></div>
+    <div class="stat">Prix moyen: <span class="stat-val">${formatXPF(avgPrix)}</span></div>
+    <div class="stat">Prix/m² moyen: <span class="stat-val">${formatXPF(avgPM2)}/m²</span></div>
+    <div class="stat">Rendement brut moyen: <span class="stat-val">${avgRdt.toFixed(1)}%</span></div>
+  `;
+
+  // Sync selection UI after render
+  updateSelectionUI();
+}
+
+function renderRow(r, cols) {
+  const isSelected = selectedIds.has(r._id);
+  return `<tr data-id="${r._id}" class="${isSelected ? 'selected' : ''}">` +
+    `<td style="text-align:center;"><input type="checkbox" class="row-check" ${isSelected ? 'checked' : ''} onclick="event.stopPropagation();toggleRowSelection('${r._id}')"></td>` +
+    cols.map(c => `<td>${formatCell(r[c.key], c, r._id)}</td>`).join('') + '</tr>';
+}
+
+function sortTable(col) {
+  if (tableSortCol === col) tableSortDir *= -1;
+  else { tableSortCol = col; tableSortDir = 1; }
+  renderTable();
+}
+
+function initColumnToggles() {
+  const container = document.getElementById('col-toggles');
+  container.innerHTML = TABLE_COLS.map((c, i) =>
+    `<label><input type="checkbox" ${c.visible ? 'checked' : ''} onchange="TABLE_COLS[${i}].visible=this.checked;renderTable()">${c.label}</label>`
+  ).join('');
+}
+
+function exportCSV() {
+  const visibleCols = TABLE_COLS.filter(c => c.visible && c.key !== 'photo');
+  const rows = DATA.annonces.map(a => getRowData(a));
+  let csv = visibleCols.map(c => c.label).join(';') + '\n';
+  rows.forEach(r => {
+    csv += visibleCols.map(c => {
+      let v = r[c.key];
+      if (c.format === 'pct') v = v.toFixed(1) + '%';
+      if (typeof v === 'string' && v.includes(';')) v = '"' + v + '"';
+      return v ?? '';
+    }).join(';') + '\n';
+  });
+  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'annonces-noumea-' + new Date().toISOString().slice(0,10) + '.csv';
+  a.click();
+}
+
+// Table search listener
+document.getElementById('table-search').addEventListener('input', debounce(renderTable, 200));
+document.getElementById('group-by').addEventListener('change', renderTable);
+initColumnToggles();
+
+// Close column toggles & actions menu on outside click
+document.addEventListener('click', function(e) {
+  const ct = document.getElementById('col-toggles');
+  if (ct && !ct.contains(e.target) && !e.target.classList.contains('col-toggle-btn')) ct.classList.remove('open');
+  const am = document.getElementById('actions-menu');
+  if (am && !am.contains(e.target) && !e.target.classList.contains('actions-btn')) am.classList.remove('open');
+});
+
+// ============================================
+//  COLUMN DRAG & DROP
+// ============================================
+const COL_ORDER_KEY = 'immo_nc_col_order_v1';
+let dragSrcColKey = null;
+
+// Restore saved column order on load
+(function restoreColumnOrder() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(COL_ORDER_KEY));
+    if (saved && Array.isArray(saved) && saved.length > 0) {
+      const keyMap = {};
+      TABLE_COLS.forEach(c => { keyMap[c.key] = c; });
+      const reordered = [];
+      // First add columns in saved order
+      saved.forEach(key => {
+        if (keyMap[key]) { reordered.push(keyMap[key]); delete keyMap[key]; }
+      });
+      // Then add any new columns not in saved order
+      TABLE_COLS.forEach(c => {
+        if (keyMap[c.key]) reordered.push(c);
+      });
+      // Replace TABLE_COLS contents
+      TABLE_COLS.length = 0;
+      reordered.forEach(c => TABLE_COLS.push(c));
+    }
+  } catch(e) {}
+})();
+
+function saveColumnOrder() {
+  localStorage.setItem(COL_ORDER_KEY, JSON.stringify(TABLE_COLS.map(c => c.key)));
+}
+
+function initColumnDragDrop() {
+  const ths = document.querySelectorAll('#table-head th[draggable="true"]');
+  ths.forEach(th => {
+    th.addEventListener('dragstart', function(e) {
+      dragSrcColKey = this.getAttribute('data-col-key');
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', dragSrcColKey);
+      this.style.opacity = '0.5';
+    });
+    th.addEventListener('dragend', function(e) {
+      this.style.opacity = '1';
+      document.querySelectorAll('#table-head th').forEach(t => {
+        t.classList.remove('drag-over-left', 'drag-over-right');
+      });
+    });
+    th.addEventListener('dragover', function(e) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      const rect = this.getBoundingClientRect();
+      const midX = rect.left + rect.width / 2;
+      this.classList.remove('drag-over-left', 'drag-over-right');
+      if (e.clientX < midX) this.classList.add('drag-over-left');
+      else this.classList.add('drag-over-right');
+    });
+    th.addEventListener('dragleave', function(e) {
+      this.classList.remove('drag-over-left', 'drag-over-right');
+    });
+    th.addEventListener('drop', function(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      this.classList.remove('drag-over-left', 'drag-over-right');
+      const targetKey = this.getAttribute('data-col-key');
+      if (!dragSrcColKey || dragSrcColKey === targetKey) return;
+
+      // Find indices in TABLE_COLS (full array, not just visible)
+      const srcIdx = TABLE_COLS.findIndex(c => c.key === dragSrcColKey);
+      const tgtIdx = TABLE_COLS.findIndex(c => c.key === targetKey);
+      if (srcIdx === -1 || tgtIdx === -1) return;
+
+      // Determine drop side
+      const rect = this.getBoundingClientRect();
+      const dropAfter = e.clientX >= rect.left + rect.width / 2;
+
+      // Remove source and re-insert
+      const [moved] = TABLE_COLS.splice(srcIdx, 1);
+      let newIdx = TABLE_COLS.findIndex(c => c.key === targetKey);
+      if (dropAfter) newIdx++;
+      TABLE_COLS.splice(newIdx, 0, moved);
+
+      saveColumnOrder();
+      initColumnToggles();
+      renderTable();
+    });
+  });
+}
+
+// ============================================
+//  SELECTION & BULK ACTIONS
+// ============================================
+const selectedIds = new Set();
+
+function toggleRowSelection(id) {
+  if (selectedIds.has(id)) selectedIds.delete(id);
+  else selectedIds.add(id);
+  updateSelectionUI();
+}
+
+function toggleSelectAll() {
+  const allCheckbox = document.getElementById('select-all-cb');
+  const visibleRows = getVisibleRowIds();
+  if (allCheckbox && allCheckbox.checked) {
+    visibleRows.forEach(id => selectedIds.add(id));
+  } else {
+    visibleRows.forEach(id => selectedIds.delete(id));
+  }
+  updateSelectionUI();
+}
+
+function getVisibleRowIds() {
+  const search = document.getElementById('table-search').value.toLowerCase();
+  let rows = DATA.annonces.map(a => getRowData(a));
+  if (search) {
+    rows = rows.filter(r =>
+      r.titre.toLowerCase().includes(search) ||
+      r.quartier.toLowerCase().includes(search) ||
+      r.notes.toLowerCase().includes(search) ||
+      r.type_bien.toLowerCase().includes(search) ||
+      r.source.toLowerCase().includes(search) ||
+      r.etat.toLowerCase().includes(search) ||
+      r.user_comment.toLowerCase().includes(search) ||
+      r.comment_mc.toLowerCase().includes(search) ||
+      (search === 'favoris' && r.rating >= 4) ||
+      (search === 'notees' && r.rating > 0) ||
+      (search.match(/^\d+ etoile/) && r.rating >= parseInt(search))
+    );
+  }
+  return rows.map(r => r._id);
+}
+
+function updateSelectionUI() {
+  // Update row highlights and checkboxes
+  document.querySelectorAll('#table-body tr[data-id]').forEach(tr => {
+    const id = tr.getAttribute('data-id');
+    const cb = tr.querySelector('.row-check');
+    const isSelected = selectedIds.has(id);
+    tr.classList.toggle('selected', isSelected);
+    if (cb) cb.checked = isSelected;
+  });
+  // Update select-all checkbox
+  const visibleIds = getVisibleRowIds();
+  const allCb = document.getElementById('select-all-cb');
+  if (allCb) {
+    const allSelected = visibleIds.length > 0 && visibleIds.every(id => selectedIds.has(id));
+    const someSelected = visibleIds.some(id => selectedIds.has(id));
+    allCb.checked = allSelected;
+    allCb.indeterminate = someSelected && !allSelected;
+  }
+  // Update selection count
+  const count = selectedIds.size;
+  const info = document.getElementById('selection-info');
+  const countEl = document.getElementById('selection-count');
+  if (info) info.style.display = count > 0 ? 'flex' : 'none';
+  if (countEl) countEl.textContent = count;
+}
+
+function bulkAction(action, value) {
+  document.getElementById('actions-menu').classList.remove('open');
+
+  if (action === 'selectAll') {
+    getVisibleRowIds().forEach(id => selectedIds.add(id));
+    updateSelectionUI();
+    return;
+  }
+  if (action === 'selectNone') {
+    selectedIds.clear();
+    updateSelectionUI();
+    return;
+  }
+  if (action === 'invertSelection') {
+    const visibleIds = getVisibleRowIds();
+    visibleIds.forEach(id => {
+      if (selectedIds.has(id)) selectedIds.delete(id);
+      else selectedIds.add(id);
+    });
+    updateSelectionUI();
+    return;
+  }
+
+  if (selectedIds.size === 0) {
+    alert('Aucune annonce sélectionnée.');
+    return;
+  }
+
+  const ids = [...selectedIds];
+  const count = ids.length;
+
+  if (action === 'archive') {
+    if (!confirm(`Archiver ${count} annonce(s) ?`)) return;
+    ids.forEach(id => setStatut(id, 'archive'));
+    selectedIds.clear();
+    renderTable();
+    applyFilters();
+    return;
+  }
+  if (action === 'restore') {
+    ids.forEach(id => setStatut(id, 'actif'));
+    selectedIds.clear();
+    renderTable();
+    applyFilters();
+    return;
+  }
+  if (action === 'delete') {
+    if (!confirm(`Supprimer ${count} annonce(s) ? (Elles pourront être restaurées)`)) return;
+    ids.forEach(id => setStatut(id, 'supprime'));
+    selectedIds.clear();
+    renderTable();
+    applyFilters();
+    return;
+  }
+  if (action === 'rate') {
+    ids.forEach(id => setUserRating(id, value));
+    selectedIds.clear();
+    renderTable();
+    return;
+  }
+}
+
+// ============================================
+//  GALLERY & LIGHTBOX
+// ============================================
+const galleryState = {};
+
+function galleryNav(id, dir) {
+  const annonce = DATA.annonces.find(a => a.id === id);
+  if (!annonce || !annonce.photos) return;
+  const photos = annonce.photos.filter(p => p && p.startsWith('http'));
+  if (!galleryState[id]) galleryState[id] = 0;
+  galleryState[id] = (galleryState[id] + dir + photos.length) % photos.length;
+  galleryGo(id, galleryState[id]);
+}
+
+function galleryGo(id, idx) {
+  const annonce = DATA.annonces.find(a => a.id === id);
+  if (!annonce || !annonce.photos) return;
+  const photos = annonce.photos.filter(p => p && p.startsWith('http'));
+  galleryState[id] = idx;
+  const gallery = document.getElementById('gallery-' + id);
+  if (!gallery) return;
+  const mainImg = gallery.querySelector('.gallery-main');
+  if (mainImg) mainImg.src = photos[idx];
+  const counter = document.getElementById('gallery-idx-' + id);
+  if (counter) counter.textContent = idx + 1;
+  gallery.querySelectorAll('.popup-thumbs img').forEach((thumb, i) => {
+    thumb.classList.toggle('active', i === idx);
+  });
+}
+
+// Lightbox
+let lightboxPhotos = [];
+let lightboxIdx = 0;
+
+function openLightbox(id, idx) {
+  const annonce = DATA.annonces.find(a => a.id === id);
+  if (!annonce || !annonce.photos) return;
+  lightboxPhotos = annonce.photos.filter(p => p && p.startsWith('http'));
+  lightboxIdx = idx;
+  renderLightbox();
+  document.getElementById('lightbox').classList.add('open');
+}
+
+function closeLightbox() {
+  document.getElementById('lightbox').classList.remove('open');
+}
+
+function lightboxNav(dir) {
+  lightboxIdx = (lightboxIdx + dir + lightboxPhotos.length) % lightboxPhotos.length;
+  renderLightbox();
+}
+
+function renderLightbox() {
+  document.getElementById('lightbox-img').src = lightboxPhotos[lightboxIdx];
+  document.getElementById('lightbox-counter').textContent = (lightboxIdx + 1) + ' / ' + lightboxPhotos.length;
+}
+
+document.addEventListener('keydown', function(e) {
+  if (!document.getElementById('lightbox').classList.contains('open')) return;
+  if (e.key === 'Escape') closeLightbox();
+  if (e.key === 'ArrowLeft') lightboxNav(-1);
+  if (e.key === 'ArrowRight') lightboxNav(1);
+});
+</script>
+
+<!-- Lightbox overlay -->
+<div class="lightbox-overlay" id="lightbox" onclick="if(event.target===this)closeLightbox()">
+  <button class="lightbox-close" onclick="closeLightbox()">&times;</button>
+  <button class="lightbox-nav lightbox-prev" onclick="lightboxNav(-1)">‹</button>
+  <img id="lightbox-img" src="" alt="Photo agrandie">
+  <button class="lightbox-nav lightbox-next" onclick="lightboxNav(1)">›</button>
+  <div class="lightbox-counter" id="lightbox-counter"></div>
+</div>
+
+</body>
+</html>
