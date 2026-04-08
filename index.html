@@ -96,6 +96,26 @@ body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background:
 .current-user-badge.jev { background: #f1c40f; color: #1a1a2e; }
 .current-user-badge.mc { background: #e67e22; color: white; }
 
+/* Saved views / Espaces de travail */
+.views-bar { display: flex; align-items: center; gap: 8px; padding: 0 4px; }
+.view-select { padding: 5px 10px; background: #1a1a2e; border: 1px solid #0f3460; border-radius: 6px; color: #eee; font-size: 0.82em; max-width: 180px; cursor: pointer; }
+.view-select option { background: #16213e; }
+.view-btn { padding: 5px 10px; border: 1px solid #0f3460; border-radius: 6px; font-size: 0.78em; cursor: pointer; font-weight: 600; background: #0f3460; color: #a0a0b0; white-space: nowrap; }
+.view-btn:hover { background: #1a3a6e; color: #eee; }
+.view-btn.save { background: #27ae60; border-color: #27ae60; color: white; }
+.view-btn.save:hover { background: #2ecc71; }
+.view-btn.delete { background: transparent; border-color: #e74c3c; color: #e74c3c; }
+.view-btn.delete:hover { background: #e74c3c; color: white; }
+.view-modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 9999; display: flex; align-items: center; justify-content: center; }
+.view-modal { background: #16213e; border: 2px solid #e94560; border-radius: 12px; padding: 24px; min-width: 320px; }
+.view-modal h3 { color: #e94560; margin-bottom: 12px; font-size: 1.1em; }
+.view-modal input { width: 100%; padding: 10px 12px; background: #1a1a2e; border: 1px solid #0f3460; border-radius: 8px; color: #eee; font-size: 0.95em; margin-bottom: 14px; }
+.view-modal input:focus { outline: none; border-color: #e94560; }
+.view-modal-btns { display: flex; gap: 8px; justify-content: flex-end; }
+.view-modal-btns button { padding: 8px 18px; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 0.9em; }
+.view-modal-btns .vm-cancel { background: #1a1a2e; color: #a0a0b0; border: 1px solid #0f3460; }
+.view-modal-btns .vm-save { background: #e94560; color: white; }
+
 /* Drag & drop columns */
 .data-table th[draggable="true"] { cursor: grab; }
 .data-table th[draggable="true"]:active { cursor: grabbing; }
@@ -401,6 +421,13 @@ body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background:
       <div style="position:relative;">
         <button class="col-toggle-btn" onclick="document.getElementById('col-toggles').classList.toggle('open')">⚙️ Colonnes</button>
         <div class="col-toggles" id="col-toggles"></div>
+      </div>
+            <div class="views-bar">
+        <select class="view-select" id="view-select" onchange="loadView(this.value)" title="Charger un espace de travail">
+          <option value="">📐 Vue par défaut</option>
+        </select>
+        <button class="view-btn save" onclick="promptSaveView()" title="Sauvegarder la vue actuelle">💾 Sauver</button>
+        <button class="view-btn delete" id="view-delete-btn" onclick="deleteCurrentView()" title="Supprimer cette vue" style="display:none;">🗑️</button>
       </div>
       <button class="export-btn" onclick="exportCSV()">📥 Exporter CSV</button>
       <div class="selection-info" id="selection-info" style="display:none;">
@@ -6802,6 +6829,157 @@ function initColumnDragDrop() {
       initColumnToggles();
       renderTable();
     });
+  });
+}
+
+// ============================================
+//  SAVED VIEWS / ESPACES DE TRAVAIL
+// ============================================
+const VIEWS_STORAGE_KEY = 'immo_nc_saved_views_v1';
+const VIEWS_FB_PATH = 'saved_views';
+
+function getCurrentViewState() {
+  return {
+    columns: TABLE_COLS.map(c => ({ key: c.key, visible: c.visible })),
+    filters: {
+      quartier: document.getElementById('filter-quartier')?.value || 'tous',
+      type: document.getElementById('filter-type')?.value || 'tous',
+      source: document.getElementById('filter-source')?.value || 'tous',
+      prixMin: document.getElementById('filter-prix-min')?.value || '',
+      prixMax: document.getElementById('filter-prix-max')?.value || '',
+      surfaceMin: document.getElementById('filter-surface-min')?.value || '',
+      rendementMin: document.getElementById('filter-rendement-min')?.value || '',
+      dateDepuis: document.getElementById('filter-date-depuis')?.value || '',
+      dateJusqua: document.getElementById('filter-date-jusqua')?.value || ''
+    },
+    groupBy: document.getElementById('group-by')?.value || 'none',
+    search: document.getElementById('table-search')?.value || '',
+    sortCol: tableSortCol,
+    sortDir: tableSortDir
+  };
+}
+
+function applyViewState(state) {
+  if (!state) return;
+  if (state.columns && Array.isArray(state.columns)) {
+    const keyMap = {};
+    TABLE_COLS.forEach(c => { keyMap[c.key] = c; });
+    const reordered = [];
+    state.columns.forEach(sc => {
+      if (keyMap[sc.key]) { keyMap[sc.key].visible = sc.visible; reordered.push(keyMap[sc.key]); delete keyMap[sc.key]; }
+    });
+    TABLE_COLS.forEach(c => { if (keyMap[c.key]) reordered.push(c); });
+    TABLE_COLS.length = 0;
+    reordered.forEach(c => TABLE_COLS.push(c));
+    saveColumnOrder();
+  }
+  if (state.filters) {
+    const f = state.filters;
+    const setVal = (id, val) => { const el = document.getElementById(id); if (el) el.value = val || ''; };
+    setVal('filter-quartier', f.quartier); setVal('filter-type', f.type); setVal('filter-source', f.source);
+    setVal('filter-prix-min', f.prixMin); setVal('filter-prix-max', f.prixMax);
+    setVal('filter-surface-min', f.surfaceMin); setVal('filter-rendement-min', f.rendementMin);
+    setVal('filter-date-depuis', f.dateDepuis); setVal('filter-date-jusqua', f.dateJusqua);
+  }
+  if (state.groupBy) { const el = document.getElementById('group-by'); if (el) el.value = state.groupBy; }
+  if (state.search !== undefined) { const el = document.getElementById('table-search'); if (el) el.value = state.search; }
+  if (state.sortCol) { tableSortCol = state.sortCol; tableSortDir = state.sortDir || 1; }
+  initColumnToggles(); renderTable();
+  if (typeof applyFilters === 'function') try { applyFilters(); } catch(e) {}
+}
+
+function getSavedViews() {
+  try {
+    if (firebaseReady && fbData[VIEWS_FB_PATH]) return fbData[VIEWS_FB_PATH];
+    return JSON.parse(localStorage.getItem(VIEWS_STORAGE_KEY) || '{}');
+  } catch(e) { return {}; }
+}
+
+function persistViews(views) {
+  localStorage.setItem(VIEWS_STORAGE_KEY, JSON.stringify(views));
+  if (firebaseReady && db) db.ref(VIEWS_FB_PATH).set(views);
+}
+
+function refreshViewSelect() {
+  const sel = document.getElementById('view-select');
+  const delBtn = document.getElementById('view-delete-btn');
+  if (!sel) return;
+  const views = getSavedViews();
+  const currentVal = sel.value;
+  sel.innerHTML = '<option value="">📐 Vue par défaut</option>';
+  Object.keys(views).sort().forEach(name => {
+    const opt = document.createElement('option');
+    opt.value = name; opt.textContent = '📋 ' + name;
+    sel.appendChild(opt);
+  });
+  if (currentVal && views[currentVal]) sel.value = currentVal;
+  if (delBtn) delBtn.style.display = sel.value ? 'inline-block' : 'none';
+}
+
+function loadView(name) {
+  const delBtn = document.getElementById('view-delete-btn');
+  if (!name) {
+    TABLE_COLS.forEach(c => { c.visible = true; });
+    ['etage','rendement_net','travaux_estimes','parking','origine'].forEach(k => {
+      const col = TABLE_COLS.find(c => c.key === k); if (col) col.visible = false;
+    });
+    ['filter-quartier','filter-type','filter-source'].forEach(id => { const el = document.getElementById(id); if (el) el.value = 'tous'; });
+    ['filter-prix-min','filter-prix-max','filter-surface-min','filter-rendement-min','filter-date-depuis','filter-date-jusqua','table-search'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+    const gb = document.getElementById('group-by'); if (gb) gb.value = 'none';
+    tableSortCol = 'prix_vente'; tableSortDir = 1;
+    initColumnToggles(); renderTable();
+    if (typeof applyFilters === 'function') try { applyFilters(); } catch(e) {}
+    if (delBtn) delBtn.style.display = 'none';
+    return;
+  }
+  const views = getSavedViews();
+  if (views[name]) { applyViewState(views[name]); if (delBtn) delBtn.style.display = 'inline-block'; }
+}
+
+function promptSaveView() {
+  const overlay = document.createElement('div');
+  overlay.className = 'view-modal-overlay'; overlay.id = 'view-modal-overlay';
+  const currentSel = document.getElementById('view-select')?.value || '';
+  overlay.innerHTML = '<div class="view-modal"><h3>💾 Sauvegarder l\'espace de travail</h3><input type="text" id="view-name-input" placeholder="Nom de la vue (ex: Apparts budget, Top rendement...)" value="' + currentSel + '" autofocus><div style="font-size:0.78em;color:#a0a0b0;margin:-8px 0 14px;">Colonnes, filtres, tri et regroupement seront sauvegardés.</div><div class="view-modal-btns"><button class="vm-cancel" onclick="document.getElementById(\'view-modal-overlay\').remove()">Annuler</button><button class="vm-save" onclick="saveViewFromModal()">Sauvegarder</button></div></div>';
+  document.body.appendChild(overlay);
+  const input = document.getElementById('view-name-input');
+  input.focus(); input.select();
+  input.addEventListener('keydown', e => { if (e.key === 'Enter') saveViewFromModal(); });
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+}
+
+function saveViewFromModal() {
+  const input = document.getElementById('view-name-input');
+  const name = (input?.value || '').trim();
+  if (!name) { input.style.borderColor = '#e74c3c'; return; }
+  const views = getSavedViews();
+  views[name] = getCurrentViewState();
+  persistViews(views);
+  document.getElementById('view-modal-overlay')?.remove();
+  refreshViewSelect();
+  document.getElementById('view-select').value = name;
+  document.getElementById('view-delete-btn').style.display = 'inline-block';
+}
+
+function deleteCurrentView() {
+  const sel = document.getElementById('view-select');
+  const name = sel?.value;
+  if (!name) return;
+  if (!confirm('Supprimer la vue "' + name + '" ?')) return;
+  const views = getSavedViews();
+  delete views[name];
+  persistViews(views);
+  sel.value = '';
+  refreshViewSelect();
+  document.getElementById('view-delete-btn').style.display = 'none';
+}
+
+refreshViewSelect();
+
+if (typeof db !== 'undefined' && db) {
+  db.ref(VIEWS_FB_PATH).on('value', snap => {
+    fbData[VIEWS_FB_PATH] = snap.val() || {};
+    refreshViewSelect();
   });
 }
 
