@@ -6591,6 +6591,7 @@ function switchTab(name) {
 // ============================================
 var TABLE_COLS = [
   { key: 'photo', label: 'ð·', visible: true, sortable: false },
+  { key: 'auto_tags', label: '🤖 Match', visible: true, sortable: true },
   { key: 'titre', label: 'Titre', visible: true, sortable: true },
   { key: 'quartier', label: 'Quartier', visible: true, sortable: true },
   { key: 'type_bien', label: 'Type', visible: true, sortable: true },
@@ -6623,6 +6624,8 @@ let tableSortDir = 1; // 1=asc, -1=desc
 function getRowData(a) {
   return {
     photo: a.photos && a.photos.length > 0 ? a.photos[0] : '',
+    auto_tags: Array.isArray(a.auto_tags) ? a.auto_tags : [],
+    auto_tags_reason: a.auto_tags_reason || '',
     titre: a.titre,
     quartier: (DATA.quartiers[a.quartier] || {}).nom || a.quartier,
     quartier_key: a.quartier,
@@ -6656,6 +6659,18 @@ function getRowData(a) {
 
 function formatCell(val, col, rowId) {
   if (col.key === 'photo') return val ? `<img class="thumb" src="${val}" onerror="this.style.display='none'" onclick="openLightbox('${rowId}',0)">` : '';
+  if (col.key === 'auto_tags') {
+    if (!Array.isArray(val) || val.length === 0) return '';
+    const row = DATA.annonces.find(x => x.id === rowId);
+    const reason = (row && row.auto_tags_reason) ? row.auto_tags_reason.replace(/"/g, '&quot;') : '';
+    const out = val.map(t => {
+      if (t === 'favori') return '<span title="' + reason + '" style="background:#27ae60;color:white;padding:2px 6px;border-radius:10px;font-size:0.85em;font-weight:bold;">⭐ Favori</span>';
+      if (t === 'rejet')  return '<span title="' + reason + '" style="background:#c0392b;color:white;padding:2px 6px;border-radius:10px;font-size:0.85em;font-weight:bold;">⚠️ Rejet</span>';
+      if (t === 'nouveau') return '<span style="background:#2980b9;color:white;padding:2px 6px;border-radius:10px;font-size:0.85em;font-weight:bold;">🆕 Nouveau</span>';
+      return '<span style="background:#555;color:white;padding:2px 6px;border-radius:10px;font-size:0.85em;">' + t + '</span>';
+    }).join(' ');
+    return out;
+  }
   if (col.key === 'lien') return val ? `<a href="${val}" target="_blank">ð Voir</a>` : 'â';
   if (col.key === 'rating') return renderStars(rowId, val);
   if (col.key === 'user_comment') {
@@ -6711,7 +6726,10 @@ function renderTable() {
       r.comment_mc.toLowerCase().includes(search) ||
       (search === 'favoris' && r.rating >= 4) ||
       (search === 'notees' && r.rating > 0) ||
-      (search.match(/^\d+ etoile/) && r.rating >= parseInt(search))
+      (search.match(/^\d+ etoile/) && r.rating >= parseInt(search)) ||
+      (search === 'favori match' && Array.isArray(r.auto_tags) && r.auto_tags.includes('favori')) ||
+      (search === 'rejet match' && Array.isArray(r.auto_tags) && r.auto_tags.includes('rejet')) ||
+      (search === 'nouveau' && Array.isArray(r.auto_tags) && r.auto_tags.includes('nouveau'))
     );
   }
 
@@ -7093,7 +7111,10 @@ function getVisibleRowIds() {
       r.comment_mc.toLowerCase().includes(search) ||
       (search === 'favoris' && r.rating >= 4) ||
       (search === 'notees' && r.rating > 0) ||
-      (search.match(/^\d+ etoile/) && r.rating >= parseInt(search))
+      (search.match(/^\d+ etoile/) && r.rating >= parseInt(search)) ||
+      (search === 'favori match' && Array.isArray(r.auto_tags) && r.auto_tags.includes('favori')) ||
+      (search === 'rejet match' && Array.isArray(r.auto_tags) && r.auto_tags.includes('rejet')) ||
+      (search === 'nouveau' && Array.isArray(r.auto_tags) && r.auto_tags.includes('nouveau'))
     );
   }
   return rows.map(r => r._id);
