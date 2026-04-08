@@ -4561,6 +4561,7 @@ function updateDisplay() {
   markers = [];
 
   filtered.forEach(a => {
+    if (a.lat == null || a.lng == null) return; // skip annonces without coordinates
     const color = getMarkerColor(a, filtered);
     const m = createMarker(a, color);
     m.addTo(map);
@@ -4762,7 +4763,7 @@ function switchTab(name) {
 // ============================================
 //  DYNAMIC TABLE
 // ============================================
-const TABLE_COLS = [
+var TABLE_COLS = [
   { key: 'photo', label: '📷', visible: true, sortable: false },
   { key: 'titre', label: 'Titre', visible: true, sortable: true },
   { key: 'quartier', label: 'Quartier', visible: true, sortable: true },
